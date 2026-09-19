@@ -219,6 +219,8 @@ pub struct App {
     pub dialog: Option<Dialog>,
     /// Chat and message of the attachment open in the viewer.
     pub viewer: Option<(ChatId, String)>,
+    /// When the memory report was last written.
+    memory_logged: Instant,
     /// Whether the paste being handled already staged files.
     ///
     /// A file manager puts the file's icon on the clipboard as a picture
@@ -432,6 +434,7 @@ impl App {
             page: Page::Chats,
             dialog: None,
             viewer: None,
+            memory_logged: Instant::now(),
             paste_staged_files: false,
             forward_search: String::new(),
             poll_draft: Default::default(),
@@ -1593,6 +1596,58 @@ impl App {
         self.focus_composer = true;
     }
 
+    /// Writes where memory is going, every half minute, at debug level.
+    ///
+    /// Texture names carry file paths, so nothing is reported per texture.
+    /// Everything is counted into a handful of buckets instead.
+    fn log_memory(&mut self, ctx: &egui::Context) {
+        if !log::log_enabled!(log::Level::Debug)
+            || self.memory_logged.elapsed() < Duration::from_secs(30)
+        {
+            return;
+        }
+        self.memory_logged = Instant::now();
+        let manager = ctx.tex_manager();
+        let manager = manager.read();
+        let mut buckets: std::collections::BTreeMap<&str, (usize, usize)> =
+            std::collections::BTreeMap::new();
+        for (_, meta) in manager.allocated() {
+            let kind = if meta.name.starts_with("picture-") {
+                "photos"
+            } else if meta.name.starts_with("quicklook-") {
+                "documents"
+            } else if meta.name.starts_with("pending-") {
+                "composer"
+            } else if meta.name.starts_with("emoji-") {
+                "emoji"
+            } else if meta.name.contains('#') {
+                "animation"
+            } else {
+                "egui and fonts"
+            };
+            let entry = buckets.entry(kind).or_default();
+            entry.0 += 1;
+            entry.1 += meta.size[0] * meta.size[1] * meta.bytes_per_pixel;
+        }
+        let total: usize = buckets.values().map(|(_, bytes)| bytes).sum();
+        let detail: Vec<String> = buckets
+            .iter()
+            .map(|(kind, (count, bytes))| format!("{kind} {count}x {} MB", bytes / 1_048_576))
+            .collect();
+        let chats = self.conversations.len();
+        let messages: usize = self
+            .conversations
+            .values()
+            .map(|conversation| conversation.messages.len())
+            .sum();
+        log::debug!(
+            "memory: textures {} MB in {} ({}); {chats} chats loaded holding {messages} messages",
+            total / 1_048_576,
+            manager.num_allocated(),
+            detail.join(", ")
+        );
+    }
+
     /// Message ids in a chat whose attachment the viewer can show, oldest first.
     pub fn viewable(&self, chat: &str) -> Vec<String> {
         self.conversations
@@ -2555,6 +2610,7 @@ impl App {
         #[cfg(target_os = "macos")]
         self.actions
             .extend(crate::macos::drain(ctx, self.window_hidden));
+        self.log_memory(ctx);
         self.handle_control_commands();
         self.poll_custom_themes();
         self.handle_notification_opens();
