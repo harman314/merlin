@@ -3190,7 +3190,7 @@ fn video(
         return size.x;
     }
     let decoded = match (&media.path, own_poster) {
-        (Some(path), true) => Some(animation::poster(ui, path, rect)),
+        (Some(path), true) => Some(crate::thumbs::scaled(ui.ctx(), path, size)),
         _ => None,
     };
     if ui.is_rect_visible(rect) {
@@ -3201,7 +3201,7 @@ fn video(
                     .corner_radius(6.0)
                     .paint_at(ui, rect);
             }
-            (None, Some(animation::Frame::Ready(texture))) => {
+            (None, Some(crate::thumbs::Thumb::Ready(texture))) => {
                 ui.painter().image(
                     texture.id(),
                     rect,
@@ -3221,7 +3221,7 @@ fn video(
         match (&media.path, &media.state) {
             (Some(_), _)
                 if matches!(playing, Some(animation::Frame::Pending))
-                    || matches!(decoded, Some(animation::Frame::Pending)) =>
+                    || matches!(decoded, Some(crate::thumbs::Thumb::Pending)) =>
             {
                 theme::paint_spinner(ui, disc, 24.0, Color32::WHITE)
             }

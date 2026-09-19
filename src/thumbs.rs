@@ -165,7 +165,11 @@ pub fn scaled(ctx: &egui::Context, path: &Path, max: egui::Vec2) -> Thumb {
 /// The full-size decode is the high-water mark of the whole cache, so it is
 /// released before the small copy is taken rather than at the end of the call.
 fn decode(path: &Path, side: u32) -> Option<Pixels> {
-    let full = image::open(path).ok()?;
+    let Ok(full) = image::open(path) else {
+        // Not a still this library reads. A video's first frame is a picture
+        // too, and already arrives at a sensible size.
+        return crate::animation::first_frame(path);
+    };
     let small = full.thumbnail(side, side);
     drop(full);
     let scaled = small.to_rgba8();

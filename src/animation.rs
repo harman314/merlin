@@ -100,12 +100,15 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
     show(ui, path, rect, MAX_FRAMES)
 }
 
-/// Returns a video's own first frame, for one that arrived without a poster.
+/// A video's own first frame, as pixels.
 ///
-/// A single-frame entry schedules no repaints, so this costs one texture and
-/// then sits still, and it shares the eviction the animations already have.
-pub fn poster(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
-    show(ui, path, rect, 1)
+/// The decoders for video live here, but a still frame is a picture, so the
+/// picture cache owns the result rather than this one. Keeping it here would
+/// spend the animation budget, which exists for things that move.
+pub fn first_frame(path: &Path) -> Option<(usize, usize, Vec<u8>)> {
+    let decoded = decode(path, 1)?;
+    let (image, _) = decoded.frames.into_iter().next()?;
+    Some((image.size[0], image.size[1], image.as_raw().to_vec()))
 }
 
 fn show(ui: &egui::Ui, path: &Path, rect: egui::Rect, limit: usize) -> Frame {
