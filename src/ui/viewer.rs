@@ -102,6 +102,7 @@ struct Open {
     title: String,
     caption: Option<String>,
     video: bool,
+    document: bool,
     /// Position among the chat's viewable attachments, one-based.
     at: usize,
     total: usize,
@@ -110,23 +111,31 @@ struct Open {
 /// Collects what the view needs, so the borrow ends before actions are pushed.
 fn describe(app: &App, chat: &str, id: &str) -> Option<Open> {
     let message = app.conversations.get(chat)?.message(id)?;
-    let (media, caption, video) = match &message.content {
-        Content::Image { media, caption } => (media, caption.clone(), false),
-        Content::Video { media, caption, .. } => (media, caption.clone(), true),
+    let (media, caption, video, document, named) = match &message.content {
+        Content::Image { media, caption } => (media, caption.clone(), false, false, None),
+        Content::Video { media, caption, .. } => (media, caption.clone(), true, false, None),
+        Content::Document {
+            media,
+            caption,
+            file_name,
+            ..
+        } => (media, caption.clone(), false, true, Some(file_name.clone())),
         _ => return None,
     };
     let path = media.path.clone()?;
     let ids = app.viewable(chat);
     let at = ids.iter().position(|known| known == id)?;
-    let title = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "Attachment".to_owned());
+    let title = named.unwrap_or_else(|| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Attachment".to_owned())
+    });
     Some(Open {
         path,
         title,
         caption,
         video,
+        document,
         at: at + 1,
         total: ids.len(),
     })
@@ -140,6 +149,36 @@ fn paint(
     transform: Transform,
     dim: Color32,
 ) -> Option<Rect> {
+    // Documents render through the system thumbnailer rather than a bundled engine.
+    if open.document {
+        return match crate::quicklook::preview(ui.ctx(), &open.path, canvas.height()) {
+            crate::quicklook::Preview::Ready(texture) => {
+                let size = texture.size_vec2();
+                let rect = fit(canvas, size, transform);
+                ui.painter().image(
+                    texture.id(),
+                    rect,
+                    Rect::from_min_max(egui::Pos2::ZERO, pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+                Some(rect)
+            }
+            crate::quicklook::Preview::Pending => {
+                theme::paint_spinner(ui, canvas, 28.0, dim);
+                None
+            }
+            crate::quicklook::Preview::Unavailable => {
+                ui.painter().text(
+                    canvas.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "No preview for this document. Use Open in default app.",
+                    theme::regular(13.0),
+                    dim,
+                );
+                None
+            }
+        };
+    }
     // Video and animated pictures decode in process; the still loader handles the rest.
     if open.video {
         let fitted = fit(canvas, vec2(16.0, 9.0), transform);

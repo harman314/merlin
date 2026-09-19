@@ -110,13 +110,20 @@ ksni = { version = "0.3", features = ["blocking"] }
 tray-icon = { version = "0.24", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Document previews come from QuickLook, a system framework, so the first page
+# of a PDF renders without bundling a PDF engine. These objc2 crates are
+# already in the tree through other dependencies.
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "libc", "CGImage", "CGColorSpace", "CGContext", "CGBitmapContext"] }
+objc2-quick-look-thumbnailing = { version = "0.3", default-features = false, features = ["std", "QLThumbnailGenerator", "QLThumbnailGenerationRequest", "QLThumbnailRepresentation", "block2", "objc2-core-foundation", "objc2-core-graphics"] }
+block2 = "0.6"
 apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 # Pumps AppKit without a window. The status item and Dock reopen callback must
 # stay on the main thread.
 objc2 = "0.6"
 raw-window-handle = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSButton", "NSControl", "NSEvent", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSGeometry", "NSObjCRuntime", "NSRunLoop", "NSString"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSError", "NSGeometry", "NSObjCRuntime", "NSRunLoop", "NSString", "NSURL"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = { version = "1.1", default-features = false }

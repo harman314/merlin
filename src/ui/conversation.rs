@@ -3344,7 +3344,14 @@ fn attachment(
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.clicked() && !auto {
         match &media.path {
-            Some(path) => actions.push(Action::OpenFile(path.clone())),
+            // The viewer shows documents where the system can render them, and
+            // hands the rest to the desktop as before.
+            Some(path) => actions.push(open_media(
+                view,
+                message,
+                path,
+                !crate::quicklook::available(),
+            )),
             None if !matches!(media.state, MediaState::Downloading) => {
                 actions.push(Action::Download {
                     chat: view.chat.id.clone(),

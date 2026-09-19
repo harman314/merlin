@@ -16,6 +16,7 @@ pub mod model;
 pub mod notify;
 pub mod paths;
 pub mod qr;
+pub mod quicklook;
 pub mod settings;
 pub mod single_instance;
 pub mod system_fonts;

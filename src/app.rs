@@ -2943,6 +2943,8 @@ pub fn wants_paste(input: &egui::InputState) -> bool {
 pub fn viewable(content: &Content) -> bool {
     match content {
         Content::Image { media, .. } | Content::Video { media, .. } => media.path.is_some(),
+        // Documents render through the system thumbnailer, where there is one.
+        Content::Document { media, .. } => media.path.is_some() && crate::quicklook::available(),
         _ => false,
     }
 }
