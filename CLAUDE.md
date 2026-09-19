@@ -99,6 +99,42 @@ size **before** enabling `reduce_texture_memory`: thumbnails register once
 behind a deduplication set, so forgetting their bytes first would make them
 unreloadable. The full list is in the owner's notes.
 
+## Mistakes already made here
+
+Each of these shipped or nearly shipped in this repository. They are cheap to
+repeat and were expensive to find.
+
+**Do not state what a platform API cannot do until you have listed its
+surface.** "Quick Look only returns a first page" was true of the one function
+in use and false of the framework. It nearly settled the whole preview design
+on a wrong premise, and the owner caught it. Read the crate's generated
+modules, or the framework's class list, before ruling an approach out.
+
+**Never report a command as clean when you filtered its output.** A check
+grepped for errors and `warning: unused` let every deprecation warning
+through, and CI denies warnings. Run the gate the project runs, unfiltered,
+and read the exit code.
+
+**A test that passes on a machine lacking the feature is not testing it.**
+Documents were asserted absent from the preview set, which was true on the
+test machine only because it has no preview panel. Make the platform gate
+forceable, then assert both branches.
+
+**Measure memory, never infer it.** Two rounds were lost to reasoning about
+allocation from source. The `memory:` line found the answer in one reading,
+and the owner's before-and-after numbers localised it further. Ask for a
+measurement before changing a cache.
+
+**When two paths do the same job, join them or write down why not.** Pictures
+went to the in-app viewer while documents went to the system panel, and they
+drifted until a document between two photos broke the sequence. The same
+split produced a poster cached as an animation.
+
+**An edit that silently matches nothing is a shipped bug.** Moving code into a
+module changed its indentation and a replacement quietly did nothing, leaving
+a feature missing while every test stayed green. Assert the match, and check
+the result compiles where it actually runs.
+
 ## Verifying macOS code
 
 This environment cannot build the app for macOS; a dependency needs a
