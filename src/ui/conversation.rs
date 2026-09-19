@@ -1874,13 +1874,14 @@ fn bubble_frame(
                 }
                 None => content(ui, view, message, cap, reserve, actions),
             };
-            if slot.is_none() {
-                // The time keeps its own line, but tucked up into the space the
-                // last line leaves under its baseline, so it reads as part of
-                // the bubble rather than a row after it.
-                ui.add_space(-8.0);
-            }
-            footer(ui, &palette, message, slot);
+            // The time always takes its own line under the text, never a gap
+            // inside the last one. `reserve` still shortens that last line, so
+            // it ends clear of the bubble's edge rather than running into it.
+            // The negative space lifts the time into the room the last line
+            // leaves below its baseline, so the two just touch.
+            let _ = slot;
+            ui.add_space(-7.0);
+            footer(ui, &palette, message, None);
         });
     ui.ctx()
         .data_mut(|data| data.insert_temp(rect_id, inner.response.rect));
