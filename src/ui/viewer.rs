@@ -90,10 +90,17 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 {
                     actions.push(Action::CloseViewer);
                 }
-                let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-                if backdrop.hovered() && scroll != 0.0 {
-                    transform.zoom =
-                        (transform.zoom * (1.0 + scroll * 0.002)).clamp(MIN_ZOOM, MAX_ZOOM);
+                // Scrolling moves the page and pinching scales it, as it does
+                // in a document reader. Scrolling used to zoom, which made a
+                // long document impossible to read.
+                let (scroll, pinch) =
+                    ui.input(|input| (input.smooth_scroll_delta, input.zoom_delta()));
+                if backdrop.hovered() {
+                    if pinch != 1.0 {
+                        transform.zoom = (transform.zoom * pinch).clamp(MIN_ZOOM, MAX_ZOOM);
+                    } else if scroll != Vec2::ZERO {
+                        transform.offset += scroll;
+                    }
                 }
             } else if backdrop.clicked() {
                 actions.push(Action::CloseViewer);
@@ -221,18 +228,21 @@ fn paint(
             }
         };
     }
-    let image = egui::Image::new(crate::util::image_uri(&open.path));
-    match image.load_for_size(ui.ctx(), canvas.size()) {
-        Ok(egui::load::TexturePoll::Ready { texture }) => {
-            let rect = fit(canvas, texture.size, transform);
-            image.paint_at(ui, rect);
+    // Twice the canvas, so it stays sharp on a dense display and while zoomed a
+    // little, without holding the camera-resolution decode of every picture
+    // opened this session.
+    match crate::thumbs::scaled(ui.ctx(), &open.path, canvas.size() * 2.0) {
+        crate::thumbs::Thumb::Ready(texture) => {
+            let natural = texture.size_vec2();
+            let rect = fit(canvas, natural, transform);
+            egui::Image::from_texture((texture.id(), natural)).paint_at(ui, rect);
             Some(rect)
         }
-        Ok(egui::load::TexturePoll::Pending { .. }) => {
+        crate::thumbs::Thumb::Pending => {
             theme::paint_spinner(ui, canvas, 28.0, dim);
             None
         }
-        Err(_) => {
+        crate::thumbs::Thumb::Failed => {
             ui.painter().text(
                 canvas.center(),
                 egui::Align2::CENTER_CENTER,
@@ -246,6 +256,9 @@ fn paint(
 }
 
 /// Centres the natural size inside the canvas, scaled to fit and then zoomed.
+///
+/// A document taller than the canvas is scrolled by the same offset, so the
+/// panning above reaches every part of it.
 fn fit(canvas: Rect, natural: Vec2, transform: Transform) -> Rect {
     let natural = vec2(natural.x.max(1.0), natural.y.max(1.0));
     let scale = (canvas.width() / natural.x).min(canvas.height() / natural.y);

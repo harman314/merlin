@@ -2982,16 +2982,18 @@ fn picture(
             }
             return size.x;
         }
-        let image = egui::Image::new(file_uri(path));
-        return match image.load_for_size(ui.ctx(), vec2(max_width, max_height)) {
-            Ok(egui::load::TexturePoll::Ready { texture }) => {
+        // Decoded to the size it is drawn. Letting egui load it would decode the
+        // photo at camera resolution and keep three copies of it.
+        return match crate::thumbs::scaled(ui.ctx(), path, vec2(max_width, max_height)) {
+            crate::thumbs::Thumb::Ready(texture) => {
+                let natural = texture.size_vec2();
                 let size = if sticker.is_some() {
-                    fit_sticker(texture.size.x, texture.size.y)
+                    fit_sticker(natural.x, natural.y)
                 } else {
-                    fit_picture(texture.size.x, texture.size.y, max_width, max_height)
+                    fit_picture(natural.x, natural.y, max_width, max_height)
                 };
                 let response = ui.add(
-                    image
+                    egui::Image::from_texture((texture.id(), natural))
                         .fit_to_exact_size(size)
                         .corner_radius(if sticker.is_some() { 0.0 } else { 6.0 })
                         .sense(Sense::click()),
@@ -3004,7 +3006,7 @@ fn picture(
                 }
                 size.x
             }
-            Ok(egui::load::TexturePoll::Pending { .. }) => {
+            crate::thumbs::Thumb::Pending => {
                 let size = if sticker.is_some() {
                     Vec2::splat(STICKER_SIDE)
                 } else {
@@ -3017,7 +3019,7 @@ fn picture(
                 }
                 size.x
             }
-            Err(_) => {
+            crate::thumbs::Thumb::Failed => {
                 let size = if sticker.is_some() {
                     Vec2::splat(STICKER_SIDE)
                 } else {
