@@ -172,27 +172,27 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                             palette.text,
                                         );
                                     } else {
-                                        // Align the name and subtitle with the avatar edges.
+                                        // The pair spans the avatar's height, but
+                                        // stacked close together and centred in it.
+                                        // Pushing the status to the box's bottom
+                                        // left a gap between the two lines.
                                         ui.allocate_ui_with_layout(
                                             vec2(width, 40.0),
                                             Layout::top_down(Align::Min),
                                             |ui| {
+                                                ui.spacing_mut().item_spacing.y = 1.0;
+                                                ui.add_space(3.0);
                                                 widgets::rich_text(
                                                     ui,
                                                     &title,
                                                     theme::semibold(15.0),
                                                     palette.text,
                                                 );
-                                                ui.with_layout(
-                                                    Layout::bottom_up(Align::Min),
-                                                    |ui| {
-                                                        widgets::rich_text(
-                                                            ui,
-                                                            &subtitle,
-                                                            theme::regular(12.5),
-                                                            color,
-                                                        );
-                                                    },
+                                                widgets::rich_text(
+                                                    ui,
+                                                    &subtitle,
+                                                    theme::regular(12.5),
+                                                    color,
                                                 );
                                             },
                                         );
@@ -1874,6 +1874,12 @@ fn bubble_frame(
                 }
                 None => content(ui, view, message, cap, reserve, actions),
             };
+            if slot.is_none() {
+                // The time keeps its own line, but tucked up into the space the
+                // last line leaves under its baseline, so it reads as part of
+                // the bubble rather than a row after it.
+                ui.add_space(-8.0);
+            }
             footer(ui, &palette, message, slot);
         });
     ui.ctx()
