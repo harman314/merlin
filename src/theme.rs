@@ -155,6 +155,26 @@ pub const PANE_INSET: i8 = 16;
 /// divider whatever their contents.
 pub const HEADER_ROW: f32 = 44.0;
 
+/// Padding above and below a header's content row. The top is the larger of the
+/// two so the row sits off the window edge rather than against it.
+pub const HEADER_PAD_TOP: i8 = 14;
+pub const HEADER_PAD_BOTTOM: i8 = 10;
+
+/// Margin shared by both headers, so their content aligns across the divider.
+pub const fn header_margin() -> egui::Margin {
+    egui::Margin {
+        left: PANE_INSET,
+        right: PANE_INSET,
+        top: HEADER_PAD_TOP,
+        bottom: HEADER_PAD_BOTTOM,
+    }
+}
+
+/// Full height of a header row with its padding.
+pub fn header_height() -> f32 {
+    f32::from(HEADER_PAD_TOP) + HEADER_ROW + f32::from(HEADER_PAD_BOTTOM)
+}
+
 const INTER_MEDIUM: &str = "inter-medium";
 const INTER_SEMIBOLD: &str = "inter-semibold";
 const INTER_BOLD: &str = "inter-bold";

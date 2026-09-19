@@ -45,7 +45,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
     }
     let palette = app.palette;
     Frame::new()
-        .inner_margin(Margin::symmetric(theme::PANE_INSET, 8))
+        .inner_margin(theme::header_margin())
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 if app.show_archived {
@@ -142,10 +142,10 @@ fn macos_header(app: &mut App, ui: &mut egui::Ui) {
     let inset = theme::traffic_light_inset(ui.ctx());
     let mut drag = ui.max_rect();
     drag.min.x += inset;
-    drag.max.y = drag.min.y + 60.0;
+    drag.max.y = drag.min.y + theme::header_height();
     super::titlebar_drag(ui, drag);
     Frame::new()
-        .inner_margin(Margin::symmetric(theme::PANE_INSET, 8))
+        .inner_margin(theme::header_margin())
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.set_min_height(theme::HEADER_ROW);
@@ -194,7 +194,7 @@ fn macos_header(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
             });
-            ui.add_space(6.0);
+            ui.add_space(12.0);
             let mut text = app.search.clone();
             let response = widgets::search_field(
                 ui,

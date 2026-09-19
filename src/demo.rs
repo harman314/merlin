@@ -2556,8 +2556,10 @@ mod tests {
         let rect = ctx
             .data(|data| data.get_temp::<egui::Rect>(id))
             .expect("the bubble was drawn");
+        // Well short of the bubble cap, which is the point. The ceiling tracks
+        // bubble padding, so widening that moves it.
         assert!(
-            (240.0..=345.0).contains(&rect.width()),
+            (240.0..=355.0).contains(&rect.width()),
             "{} wide",
             rect.width()
         );

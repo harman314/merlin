@@ -98,7 +98,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
         .frame(
             Frame::new()
                 .fill(palette.panel)
-                .inner_margin(Margin::symmetric(theme::PANE_INSET, 8)),
+                .inner_margin(theme::header_margin()),
         )
         .show(ui, |ui| {
             if theme::macos_chrome(ui.ctx()) {
@@ -1813,10 +1813,10 @@ fn bubble_frame(
         .fill(fill)
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin {
-            left: 12,
-            right: 12,
-            top: 8,
-            bottom: 7,
+            left: 14,
+            right: 14,
+            top: 10,
+            bottom: 9,
         })
         .show(ui, |ui| {
             ui.set_max_width(max_width);
