@@ -17,8 +17,12 @@ use std::time::Instant;
 /// is a few dozen pictures at the size they are drawn.
 const MAX_RESIDENT_PIXELS: usize = 25_000_000;
 
-/// Decoders allowed at once, so a long chat cannot start a thread per row.
-const MAX_DECODERS: usize = 3;
+/// Decoders allowed at once.
+///
+/// Each one briefly holds a whole decoded picture, because the decoder has no
+/// way to read a JPEG at reduced size, so this bounds the spike as much as the
+/// thread count. Two keeps a chat scrolling without a third full-size buffer.
+const MAX_DECODERS: usize = 2;
 
 /// Requested sizes are rounded up to this, so dragging a window edge does not
 /// decode the same picture again at every intermediate width.
@@ -154,9 +158,14 @@ pub fn scaled(ctx: &egui::Context, path: &Path, max: egui::Vec2) -> Thumb {
 }
 
 /// Decodes a picture and scales it to fit a square of `side`.
+///
+/// The full-size decode is the high-water mark of the whole cache, so it is
+/// released before the small copy is taken rather than at the end of the call.
 fn decode(path: &Path, side: u32) -> Option<Pixels> {
-    let image = image::open(path).ok()?;
-    let scaled = image.thumbnail(side, side).to_rgba8();
+    let full = image::open(path).ok()?;
+    let small = full.thumbnail(side, side);
+    drop(full);
+    let scaled = small.to_rgba8();
     Some((
         scaled.width() as usize,
         scaled.height() as usize,
