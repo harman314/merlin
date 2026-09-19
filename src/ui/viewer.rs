@@ -12,6 +12,11 @@ use crate::theme::{self, Icon};
 
 /// Height of the bar holding the title and controls.
 const BAR: f32 = 56.0;
+/// Inset from the window's left and right edges.
+const EDGE: f32 = 24.0;
+/// An icon button centres its icon in a box 12 wider, so its visual edge sits
+/// this far inside the box. Controls subtract it to line up with the title.
+const ICON_SLACK: f32 = 6.0;
 /// Room for the traffic lights when macOS draws them over the content.
 const MACOS_INSET: f32 = 80.0;
 const MIN_ZOOM: f32 = 0.2;
@@ -57,7 +62,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             ui.set_min_size(screen.size());
             ui.painter()
                 .rect_filled(screen, 0.0, Color32::from_black_alpha(235));
-            let canvas = Rect::from_min_max(pos2(screen.left(), screen.top() + BAR), screen.max);
+            // Inset every side equally, and the bar's height top and bottom, so
+            // the picture sits in the optical centre rather than a bar's height
+            // below it.
+            let canvas = Rect::from_min_max(
+                pos2(screen.left() + EDGE, screen.top() + BAR),
+                pos2(screen.right() - EDGE, screen.bottom() - BAR),
+            );
 
             // A click that misses the picture closes the viewer, as it does on
             // the phone. The picture takes the drag so panning still works.
@@ -258,18 +269,24 @@ fn bar(
     let left = if theme::macos_chrome(ui.ctx()) {
         rect.left() + MACOS_INSET
     } else {
-        rect.left() + 16.0
+        rect.left() + f32::from(theme::PANE_INSET)
+    };
+    let stacked = open.total > 1;
+    let title_y = if stacked {
+        rect.center().y - 8.0
+    } else {
+        rect.center().y
     };
     ui.painter().text(
-        pos2(left, rect.center().y),
+        pos2(left, title_y),
         egui::Align2::LEFT_CENTER,
         &open.title,
         theme::medium(13.0),
         palette.text,
     );
-    if open.total > 1 {
+    if stacked {
         ui.painter().text(
-            pos2(left, rect.center().y + 15.0),
+            pos2(left, rect.center().y + 9.0),
             egui::Align2::LEFT_CENTER,
             format!("{} of {}", open.at, open.total),
             theme::regular(11.0),
@@ -285,12 +302,16 @@ fn bar(
             palette.text,
         );
     }
+    let controls = Rect::from_min_max(
+        pos2(rect.right() - 260.0, rect.top()),
+        pos2(
+            rect.right() - f32::from(theme::PANE_INSET) + ICON_SLACK,
+            rect.bottom(),
+        ),
+    );
     let mut ui = ui.new_child(
         egui::UiBuilder::new()
-            .max_rect(Rect::from_min_max(
-                pos2(rect.right() - 210.0, rect.top()),
-                rect.max,
-            ))
+            .max_rect(controls)
             .layout(egui::Layout::right_to_left(egui::Align::Center)),
     );
     let ui = &mut ui;
