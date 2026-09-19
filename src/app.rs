@@ -2739,6 +2739,8 @@ impl App {
         // composer. This runs before the views, so the field never sees the event.
         if text_paste {
             let files = clipboard_files();
+            // Counts only. Paths can carry personal data and never reach the log.
+            log::debug!("paste: {} file(s) on the clipboard", files.len());
             if !files.is_empty() {
                 ctx.input_mut(|input| {
                     input

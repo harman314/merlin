@@ -25,6 +25,12 @@ use super::widgets;
 const AUTO_DOWNLOAD_LIMIT: u64 = 64 * 1024 * 1024;
 /// Group-message avatar size.
 const SENDER_AVATAR: f32 = 28.0;
+/// Gap between consecutive messages from one sender.
+const RUN_SPACING: f32 = 2.0;
+/// Extra gap where the sender changes or a pause breaks the run.
+const RUN_GAP: f32 = 9.0;
+/// A pause this long starts a new run even from the same sender.
+const RUN_PAUSE: i64 = 60;
 const BODY_SIZE: f32 = 14.5;
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -1250,7 +1256,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 .inner_margin(Margin::symmetric(18, 10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.spacing_mut().item_spacing.y = 3.0;
+                    ui.spacing_mut().item_spacing.y = RUN_SPACING;
                     top_of_history(ui, &palette, &conversation, chat, &mut actions);
                     let mut previous: Option<&Message> = None;
                     for message in &conversation.messages {
@@ -1268,6 +1274,17 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                                 );
                             });
                             ui.add_space(4.0);
+                        }
+                        // Messages from one sender hug together; a change of
+                        // sender or a pause opens a gap, as on the phone.
+                        let continues = !new_day
+                            && previous.is_some_and(|previous| {
+                                previous.from_me == message.from_me
+                                    && previous.sender == message.sender
+                                    && message.timestamp - previous.timestamp < RUN_PAUSE
+                            });
+                        if previous.is_some() && !new_day && !continues {
+                            ui.add_space(RUN_GAP);
                         }
                         let show_sender = (chat.is_group() || app_pictures)
                             && !message.from_me
@@ -1793,10 +1810,10 @@ fn bubble_frame(
         .fill(fill)
         .corner_radius(CornerRadius::same(10))
         .inner_margin(Margin {
-            left: 10,
-            right: 10,
-            top: 6,
-            bottom: 5,
+            left: 12,
+            right: 12,
+            top: 8,
+            bottom: 7,
         })
         .show(ui, |ui| {
             ui.set_max_width(max_width);
