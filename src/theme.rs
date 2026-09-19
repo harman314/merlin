@@ -143,7 +143,17 @@ fn hsl(hue: f32, saturation: f32, lightness: f32) -> Color32 {
 pub const RADIUS: u8 = 8;
 pub const RADIUS_SMALL: u8 = 4;
 pub const ROW_HEIGHT: f32 = 68.0;
-pub const TOP_BAR_HEIGHT: f32 = 60.0;
+
+/// Left and right inset for every pane's content.
+///
+/// The header, the message column, the composer, and the chat list all use it,
+/// so their content shares one left edge down each pane. Anything that offsets
+/// against the window edge, such as the macOS traffic lights, measures from it.
+pub const PANE_INSET: i8 = 16;
+
+/// Height of the content row in both headers, so the panes align across the
+/// divider whatever their contents.
+pub const HEADER_ROW: f32 = 44.0;
 
 const INTER_MEDIUM: &str = "inter-medium";
 const INTER_SEMIBOLD: &str = "inter-semibold";

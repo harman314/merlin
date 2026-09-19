@@ -98,7 +98,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
         .frame(
             Frame::new()
                 .fill(palette.panel)
-                .inner_margin(Margin::symmetric(14, 8)),
+                .inner_margin(Margin::symmetric(theme::PANE_INSET, 8)),
         )
         .show(ui, |ui| {
             if theme::macos_chrome(ui.ctx()) {
@@ -110,9 +110,12 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
             }
             ui.horizontal(|ui| {
                 // Give both rows a fixed height so their contents align.
-                ui.set_min_height(HEADER_ROW);
+                ui.set_min_height(theme::HEADER_ROW);
                 if !app.sidebar_visible && theme::macos_chrome(ui.ctx()) {
-                    ui.add_space((theme::traffic_light_inset(ui.ctx()) - 14.0).max(0.0));
+                    ui.add_space(
+                        (theme::traffic_light_inset(ui.ctx()) - f32::from(theme::PANE_INSET))
+                            .max(0.0),
+                    );
                 }
                 if !app.sidebar_visible
                     && theme::icon_button(
@@ -137,7 +140,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                         ui.allocate_ui_with_layout(
                             vec2(
                                 (ui.available_width() - right_controls).max(80.0),
-                                HEADER_ROW,
+                                theme::HEADER_ROW,
                             ),
                             Layout::left_to_right(Align::Center),
                             |ui| {
@@ -709,7 +712,7 @@ fn composer(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
         .frame(
             Frame::new()
                 .fill(palette.panel)
-                .inner_margin(Margin::symmetric(12, 8)),
+                .inner_margin(Margin::symmetric(theme::PANE_INSET, 8)),
         )
         .show(ui, |ui| {
             if chat.read_only {
@@ -1253,7 +1256,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat) {
                 }
             }
             Frame::new()
-                .inner_margin(Margin::symmetric(18, 10))
+                .inner_margin(Margin::symmetric(theme::PANE_INSET, 10))
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.spacing_mut().item_spacing.y = RUN_SPACING;
@@ -2884,8 +2887,6 @@ fn thumbnail_uri(ctx: &egui::Context, chat: &str, id: &str, bytes: &[u8]) -> Str
 const PICTURE_WIDTH: f32 = CARD_WIDTH;
 const PICTURE_HEIGHT: f32 = 440.0;
 const STICKER_SIDE: f32 = 180.0;
-/// Width of an image plus bubble padding.
-const HEADER_ROW: f32 = 44.0;
 
 /// Fits an image within bounds without upscaling and with a readable minimum.
 fn fit_picture(width: f32, height: f32, max_width: f32, max_height: f32) -> Vec2 {

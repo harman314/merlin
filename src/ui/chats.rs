@@ -45,12 +45,7 @@ fn header(app: &mut App, ui: &mut egui::Ui) {
     }
     let palette = app.palette;
     Frame::new()
-        .inner_margin(Margin {
-            left: 14,
-            right: 10,
-            top: 12,
-            bottom: 8,
-        })
+        .inner_margin(Margin::symmetric(theme::PANE_INSET, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 if app.show_archived {
@@ -150,11 +145,11 @@ fn macos_header(app: &mut App, ui: &mut egui::Ui) {
     drag.max.y = drag.min.y + 60.0;
     super::titlebar_drag(ui, drag);
     Frame::new()
-        .inner_margin(Margin::symmetric(14, 8))
+        .inner_margin(Margin::symmetric(theme::PANE_INSET, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.set_min_height(44.0);
-                ui.add_space((inset - 14.0).max(0.0));
+                ui.set_min_height(theme::HEADER_ROW);
+                ui.add_space((inset - f32::from(theme::PANE_INSET)).max(0.0));
                 if app.show_archived {
                     if theme::icon_button(
                         ui,
@@ -409,8 +404,8 @@ fn section(ui: &mut egui::Ui, palette: &Palette, label: &str) {
     ui.add_space(10.0);
     Frame::new()
         .inner_margin(Margin {
-            left: 14,
-            right: 14,
+            left: theme::PANE_INSET,
+            right: theme::PANE_INSET,
             top: 0,
             bottom: 4,
         })
