@@ -109,8 +109,8 @@ mod imp {
     use objc2::AnyThread;
     use objc2_core_foundation::{CGPoint, CGRect, CGSize};
     use objc2_core_graphics::{
-        CGBitmapContextCreate, CGBitmapInfo, CGColorSpaceCreateDeviceRGB, CGContextDrawImage,
-        CGImageAlphaInfo, CGImageGetHeight, CGImageGetWidth,
+        CGBitmapContextCreate, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+        CGImageByteOrderInfo,
     };
     use objc2_foundation::{NSError, NSString, NSURL};
     use objc2_quick_look_thumbnailing::{
@@ -121,13 +121,15 @@ mod imp {
     /// Draws the thumbnail into a known RGBA layout, whatever the source format.
     fn pixels(representation: &QLThumbnailRepresentation) -> Option<Pixels> {
         let image = unsafe { representation.CGImage() };
-        let width = unsafe { CGImageGetWidth(Some(&image)) };
-        let height = unsafe { CGImageGetHeight(Some(&image)) };
+        let width = CGImage::width(Some(&image));
+        let height = CGImage::height(Some(&image));
         if width == 0 || height == 0 {
             return None;
         }
         let mut buffer = vec![0u8; width * height * 4];
-        let space = CGColorSpaceCreateDeviceRGB()?;
+        let space = CGColorSpace::new_device_rgb()?;
+        // The buffer outlives the context, which is dropped before the vector
+        // is returned, so the pointer stays valid for every draw into it.
         let context = unsafe {
             CGBitmapContextCreate(
                 buffer.as_mut_ptr().cast(),
@@ -136,28 +138,27 @@ mod imp {
                 8,
                 width * 4,
                 Some(&space),
-                CGBitmapInfo::ByteOrderDefault.0 | CGImageAlphaInfo::PremultipliedLast.0 as u32,
+                CGImageByteOrderInfo::OrderDefault.0 | CGImageAlphaInfo::PremultipliedLast.0,
             )
         }?;
-        unsafe {
-            CGContextDrawImage(
-                Some(&context),
-                CGRect {
-                    origin: CGPoint { x: 0.0, y: 0.0 },
-                    size: CGSize {
-                        width: width as f64,
-                        height: height as f64,
-                    },
+        CGContext::draw_image(
+            Some(&context),
+            CGRect {
+                origin: CGPoint { x: 0.0, y: 0.0 },
+                size: CGSize {
+                    width: width as f64,
+                    height: height as f64,
                 },
-                Some(&image),
-            );
-        }
+            },
+            Some(&image),
+        );
+        drop(context);
         Some((width, height, buffer))
     }
 
     pub fn thumbnail(path: &Path, side: f32) -> Option<Pixels> {
         let text = NSString::from_str(path.to_str()?);
-        let url = unsafe { NSURL::fileURLWithPath(&text) };
+        let url = NSURL::fileURLWithPath(&text);
         let request = unsafe {
             QLThumbnailGenerationRequest::initWithFileAtURL_size_scale_representationTypes(
                 QLThumbnailGenerationRequest::alloc(),
