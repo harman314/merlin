@@ -10,41 +10,41 @@ libraries:
     deb: libasound2t64
     rpm: alsa-lib
 nfpm:
-  name: zapfast
-  maintainer: Carmine Paolino <carmine@paolino.me>
-  homepage: https://zapfast.rocks
+  name: merlin
+  maintainer: harman314 <harman314@users.noreply.github.com>
+  homepage: https://github.com/harman314/merlin
   description: Fast native WhatsApp client
   license: MIT
-  provides: [fastsapp]
-  conflicts: [fastsapp]
-  replaces: [fastsapp]
+  provides: []
+  conflicts: []
+  replaces: []
   contents:
-  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/zapfast"
-    dst: "/usr/bin/zapfast"
+  - src: "@PAYLOAD@/merlin-v@VERSION@-@TARGET@/merlin"
+    dst: "/usr/bin/merlin"
     file_info:
       mode: 493
-  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/LICENSE"
-    dst: "/usr/share/licenses/zapfast/LICENSE"
+  - src: "@PAYLOAD@/merlin-v@VERSION@-@TARGET@/LICENSE"
+    dst: "/usr/share/licenses/merlin/LICENSE"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/README.md"
-    dst: "/usr/share/doc/zapfast/README.md"
+  - src: "@PAYLOAD@/merlin-v@VERSION@-@TARGET@/README.md"
+    dst: "/usr/share/doc/merlin/README.md"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/packaging/applications/zapfast.desktop"
-    dst: "/usr/share/applications/zapfast.desktop"
+  - src: "@PAYLOAD@/merlin-v@VERSION@-@TARGET@/packaging/applications/merlin.desktop"
+    dst: "/usr/share/applications/merlin.desktop"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/zapfast-v@VERSION@-@TARGET@/packaging/icons/zapfast.svg"
-    dst: "/usr/share/icons/hicolor/scalable/apps/zapfast.svg"
+  - src: "@PAYLOAD@/merlin-v@VERSION@-@TARGET@/packaging/icons/merlin.svg"
+    dst: "/usr/share/icons/hicolor/scalable/apps/merlin.svg"
     file_info:
       mode: 420
-  - src: contrib/omarchy/zapfast.json.tpl
-    dst: /usr/share/zapfast/omarchy/zapfast.json.tpl
+  - src: contrib/omarchy/merlin.json.tpl
+    dst: /usr/share/merlin/omarchy/merlin.json.tpl
     file_info:
       mode: 420
-  - src: contrib/omarchy/zapfast-theme
-    dst: /usr/share/zapfast/omarchy/zapfast-theme
+  - src: contrib/omarchy/merlin-theme
+    dst: /usr/share/merlin/omarchy/merlin-theme
     file_info:
       mode: 493
   overrides:
@@ -98,7 +98,7 @@ targets:
       local: dist/macos-input
     native:
       command: [ruby, packaging/macos/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
-      output: 'zapfast-@TAG@-macos-universal.dmg'
+      output: 'merlin-@TAG@-macos-universal.dmg'
   linux-amd64:
     platform: linux
     arch: amd64
@@ -108,8 +108,8 @@ targets:
     - deb
     - rpm
     input:
-      local: dist/zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-      release_asset: zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      local: dist/merlin-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      release_asset: merlin-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   linux-arm64:
     platform: linux
     arch: arm64
@@ -119,75 +119,75 @@ targets:
     - deb
     - rpm
     input:
-      local: dist/zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-      release_asset: zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      local: dist/merlin-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      release_asset: merlin-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
 release:
-  repository: crmne/zapfast
+  repository: harman314/merlin
   checksums: checksums.txt
 assets:
   AMD64:
-    file: zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-    local: dist/zapfast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    file: merlin-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    local: dist/merlin-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   ARM64:
-    file: zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-    local: dist/zapfast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    file: merlin-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    local: dist/merlin-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
   MACOS:
-    file: zapfast-v@VERSION@-macos-universal.dmg
-    local: dist/zapfast-v@VERSION@-macos-universal.dmg
+    file: merlin-v@VERSION@-macos-universal.dmg
+    local: dist/merlin-v@VERSION@-macos-universal.dmg
   SOURCE:
-    file: zapfast-@VERSION@.tar.gz
-    url: https://github.com/crmne/zapfast/archive/refs/tags/v@VERSION@.tar.gz
+    file: merlin-@VERSION@.tar.gz
+    url: https://github.com/harman314/merlin/archive/refs/tags/v@VERSION@.tar.gz
     checksummed: false
-    local: dist/zapfast-@VERSION@.tar.gz
+    local: dist/merlin-@VERSION@.tar.gz
 templates:
-  homebrew/zapfast.rb: packaging/homebrew/zapfast.rb.in
-  arch/zapfast/PKGBUILD: packaging/arch/zapfast/PKGBUILD.in
-  arch/zapfast/zapfast.install: packaging/arch/zapfast.install
-  arch/zapfast-bin/PKGBUILD: packaging/arch/zapfast-bin/PKGBUILD.in
-  arch/zapfast-bin/zapfast-bin.install: packaging/arch/zapfast.install
-  arch/zapfast-git/PKGBUILD: packaging/arch/zapfast-git/PKGBUILD.in
-  arch/zapfast-git/zapfast-git.install: packaging/arch/zapfast.install
+  homebrew/merlin.rb: packaging/homebrew/merlin.rb.in
+  arch/merlin/PKGBUILD: packaging/arch/merlin/PKGBUILD.in
+  arch/merlin/merlin.install: packaging/arch/merlin.install
+  arch/merlin-bin/PKGBUILD: packaging/arch/merlin-bin/PKGBUILD.in
+  arch/merlin-bin/merlin-bin.install: packaging/arch/merlin.install
+  arch/merlin-git/PKGBUILD: packaging/arch/merlin-git/PKGBUILD.in
+  arch/merlin-git/merlin-git.install: packaging/arch/merlin.install
 repositories:
   homebrew:
-    url: https://github.com/crmne/homebrew-tap.git
-    push_url: https://github.com/crmne/homebrew-tap.git
+    url: https://github.com/harman314/homebrew-tap.git
+    push_url: https://github.com/harman314/homebrew-tap.git
     branch: main
     package_path: Casks
     files:
-      homebrew/zapfast.rb: Casks/zapfast.rb
-    version_file: Casks/zapfast.rb
+      homebrew/merlin.rb: Casks/merlin.rb
+    version_file: Casks/merlin.rb
     version_pattern: 'version "([^"]+)"'
     publish: push
   aur-source:
     group: aur
-    url: https://aur.archlinux.org/zapfast.git
-    push_url: ssh://aur@aur.archlinux.org/zapfast.git
+    url: https://aur.archlinux.org/merlin.git
+    push_url: ssh://aur@aur.archlinux.org/merlin.git
     branch: master
     package_path: "."
     files:
-      arch/zapfast: "."
+      arch/merlin: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
   aur-bin:
     group: aur
-    url: https://aur.archlinux.org/zapfast-bin.git
-    push_url: ssh://aur@aur.archlinux.org/zapfast-bin.git
+    url: https://aur.archlinux.org/merlin-bin.git
+    push_url: ssh://aur@aur.archlinux.org/merlin-bin.git
     branch: master
     package_path: "."
     files:
-      arch/zapfast-bin: "."
+      arch/merlin-bin: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
   aur-git:
     group: aur
-    url: https://aur.archlinux.org/zapfast-git.git
-    push_url: ssh://aur@aur.archlinux.org/zapfast-git.git
+    url: https://aur.archlinux.org/merlin-git.git
+    push_url: ssh://aur@aur.archlinux.org/merlin-git.git
     branch: master
     package_path: "."
     files:
-      arch/zapfast-git: "."
+      arch/merlin-git: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push

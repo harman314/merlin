@@ -1,0 +1,36 @@
+# The release workflow's Flatpak: the binary the Linux job built, packaged
+# into the same sandbox as rocks.merlin.Merlin.yml describes. The
+# job unpacks the release tarball into built/ beside this file first.
+id: rocks.merlin.Merlin
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+sdk: org.freedesktop.Sdk
+command: merlin
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --socket=pulseaudio
+  - --share=network
+  # Archive encryption key.
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --persist=.local/state
+modules:
+  - name: merlin
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 merlin /app/bin/merlin
+      - install -Dm644 packaging/applications/*.desktop /app/share/applications/rocks.merlin.Merlin.desktop
+      - sed -i 's/^Icon=.*$/Icon=rocks.merlin.Merlin/;s/^StartupWMClass=merlin$/StartupWMClass=rocks.merlin.Merlin/' /app/share/applications/rocks.merlin.Merlin.desktop
+      - install -Dm644 packaging/icons/*.svg /app/share/icons/hicolor/scalable/apps/rocks.merlin.Merlin.svg
+      - install -Dm644 packaging/flatpak/rocks.merlin.Merlin.metainfo.xml /app/share/metainfo/rocks.merlin.Merlin.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/merlin/LICENSE
+    sources:
+      - type: dir
+        path: built
+      # Metainfo belongs to this packaging checkout, not the portable archive.
+      - type: file
+        path: rocks.merlin.Merlin.metainfo.xml
+        dest: packaging/flatpak

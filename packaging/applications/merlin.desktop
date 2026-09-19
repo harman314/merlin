@@ -1,11 +1,11 @@
 [Desktop Entry]
 Type=Application
-Name=ZapFast
+Name=Merlin
 GenericName=WhatsApp Client
 Comment=A native WhatsApp client
-Exec=zapfast
-Icon=zapfast
+Exec=merlin
+Icon=merlin
 Terminal=false
 Categories=Network;InstantMessaging;Chat;
 Keywords=whatsapp;chat;messaging;
-StartupWMClass=zapfast
+StartupWMClass=merlin

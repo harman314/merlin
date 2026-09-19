@@ -1,4 +1,4 @@
-//! Where ZapFast keeps its files.
+//! Where Merlin keeps its files.
 //!
 //! Configuration, session state, and caches use separate standard platform
 //! directories. Clearing a cache does not remove device keys.
@@ -14,16 +14,24 @@ pub struct AppDirs {
     pub cache: PathBuf,
 }
 
+/// Earlier application names whose data Merlin takes over on first start.
+///
+/// Empty on purpose. Adoption moves directories rather than copying them, so
+/// claiming ZapFast's would take the archive and linked session away from an
+/// installation still in use. Merlin starts empty and links as its own device,
+/// so the two run side by side. Add "zapfast" here only to replace it.
+const ADOPTED_NAMES: [&str; 0] = [];
+
 impl AppDirs {
     pub fn discover() -> Self {
-        match Self::of("zapfast") {
+        match Self::of("merlin") {
             Some(dirs) => dirs,
             None => {
                 let fallback = std::env::current_dir().unwrap_or_default();
                 Self {
-                    config: fallback.join("zapfast-config"),
-                    state: fallback.join("zapfast-state"),
-                    cache: fallback.join("zapfast-cache"),
+                    config: fallback.join("merlin-config"),
+                    state: fallback.join("merlin-state"),
+                    cache: fallback.join("merlin-cache"),
                 }
             }
         }
@@ -31,7 +39,7 @@ impl AppDirs {
 
     /// Standard platform directories for the app.
     fn of(name: &str) -> Option<Self> {
-        let project = ProjectDirs::from("me", "paolino", name)?;
+        let project = ProjectDirs::from("rocks", "merlin", name)?;
         Some(Self {
             config: project.config_dir().to_path_buf(),
             state: project
@@ -45,12 +53,12 @@ impl AppDirs {
     /// Adopts earlier names, newest first, without replacing existing data.
     /// Call only after acquiring the instance guard, and never for demo runs.
     pub fn adopt_previous_names(&self) -> std::io::Result<()> {
-        for name in ["fastsapp", "fastwhatsapp"] {
+        for name in ADOPTED_NAMES {
             if let Some(old) = Self::of(name) {
                 self.adopt(&old)?;
             }
             if let (Some(from), Some(to)) =
-                (eframe::storage_dir(name), eframe::storage_dir("zapfast"))
+                (eframe::storage_dir(name), eframe::storage_dir("merlin"))
             {
                 adopt_directory(&from, &to)?;
             }
@@ -95,7 +103,7 @@ impl AppDirs {
 
     /// Current-run log, replaced at startup.
     pub fn log_file(&self) -> PathBuf {
-        self.state.join("zapfast.log")
+        self.state.join("merlin.log")
     }
 
     /// Panic log written before process exit.
@@ -179,8 +187,7 @@ mod tests {
     use super::*;
 
     fn root(name: &str) -> PathBuf {
-        let root =
-            std::env::temp_dir().join(format!("zapfast-paths-{name}-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("merlin-paths-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         root
@@ -242,7 +249,7 @@ mod tests {
         for name in ["fastsapp", "fastwhatsapp"] {
             let root = root(name);
             let old = AppDirs::under(&root.join(name));
-            let new = AppDirs::under(&root.join("zapfast"));
+            let new = AppDirs::under(&root.join("merlin"));
             old.ensure().unwrap();
             for path in [
                 old.settings_file(),
@@ -277,9 +284,18 @@ mod tests {
     }
 
     #[test]
+    fn merlin_never_takes_over_a_zapfast_installation() {
+        assert!(
+            ADOPTED_NAMES.is_empty(),
+            "adoption moves directories, so claiming another app's name would \
+             strip the archive and linked session from an installation in use"
+        );
+    }
+
+    #[test]
     fn newest_data_wins_without_merging_archives() {
         let root = root("precedence");
-        let new = AppDirs::under(&root.join("zapfast"));
+        let new = AppDirs::under(&root.join("merlin"));
         let recent = AppDirs::under(&root.join("fastsapp"));
         let oldest = AppDirs::under(&root.join("fastwhatsapp"));
         recent.ensure().unwrap();

@@ -64,7 +64,7 @@ fn empty(app: &mut App, ui: &mut egui::Ui) {
     ui.painter().text(
         center,
         Align2::CENTER_CENTER,
-        "ZapFast",
+        "Merlin",
         theme::bold(24.0),
         palette.text,
     );
@@ -1634,7 +1634,7 @@ impl SelectionLeash {
 
 impl egui::plugin::Plugin for SelectionLeash {
     fn debug_name(&self) -> &'static str {
-        "zapfast-selection-leash"
+        "merlin-selection-leash"
     }
 
     fn input_hook(&mut self, _ctx: &egui::Context, input: &mut egui::RawInput) {

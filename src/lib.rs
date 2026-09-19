@@ -1,4 +1,4 @@
-//! ZapFast internals exposed for diagnostics and tests.
+//! Merlin internals exposed for diagnostics and tests.
 
 pub mod animation;
 pub mod app;

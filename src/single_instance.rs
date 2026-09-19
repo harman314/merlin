@@ -9,12 +9,16 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Fixed high loopback port outside the ephemeral range.
-const INSTANCE_PORT: u16 = 47_119;
+///
+/// Distinct from the port ZapFast and FastsApp share. Merlin runs beside them,
+/// so it must not answer their handshake or be surfaced by theirs. Sharing both
+/// the port and the wire identity would make each app raise the other's window
+/// and exit instead of starting.
+const INSTANCE_PORT: u16 = 47_143;
 
-/// Stable wire identity shared with FastsApp so upgrades surface a running
-/// older copy before migrating its session files.
-const PREFIX: &str = "fastsapp:";
-const OK_REPLY: &str = "fastsapp:ok";
+/// Wire identity. Merlin claims no earlier app's name, for the same reason.
+const PREFIX: &str = "merlin:";
+const OK_REPLY: &str = "merlin:ok";
 
 pub enum Outcome {
     /// This process owns the instance guard.
@@ -45,7 +49,7 @@ impl Guard {
     }
 }
 
-/// Sends one request and verifies the ZapFast reply prefix.
+/// Sends one request and verifies the Merlin reply prefix.
 pub fn send(verb: &str) -> std::io::Result<()> {
     send_to(INSTANCE_PORT, verb)
 }
@@ -62,7 +66,7 @@ fn send_to(port: u16, verb: &str) -> std::io::Result<()> {
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "the port is held by something other than ZapFast",
+            "the port is held by something other than Merlin",
         ))
     }
 }
@@ -71,11 +75,11 @@ pub fn acquire(waker: &crate::backend::Waker) -> Outcome {
     let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, INSTANCE_PORT)) {
         Ok(listener) => listener,
         Err(_) => {
-            // If the port is held, continue only when it is not ZapFast.
+            // If the port is held, continue only when it is not Merlin.
             if send("show").is_ok() {
                 return Outcome::Surfaced;
             }
-            log::warn!("port {INSTANCE_PORT} is busy but not with ZapFast; running unguarded");
+            log::warn!("port {INSTANCE_PORT} is busy but not with Merlin; running unguarded");
             return Outcome::Only(Guard {
                 commands: Default::default(),
             });
@@ -87,7 +91,7 @@ pub fn acquire(waker: &crate::backend::Waker) -> Outcome {
     let commands = Arc::clone(&guard.commands);
     let waker = waker.clone();
     let spawned = std::thread::Builder::new()
-        .name("zapfast-instance".to_owned())
+        .name("merlin-instance".to_owned())
         .spawn(move || serve(listener, &commands, &waker));
     if let Err(error) = spawned {
         log::warn!("cannot listen for other launches: {error}");
@@ -106,7 +110,7 @@ fn serve(
         let Some(line) = read_line(&mut stream) else {
             continue;
         };
-        // Ignore clients without the ZapFast prefix.
+        // Ignore clients without the Merlin prefix.
         if let Some(command) = parse(&line) {
             let _ = stream.write_all(format!("{OK_REPLY}\n").as_bytes());
             commands
@@ -155,10 +159,11 @@ mod tests {
 
     #[test]
     fn only_our_own_show_is_understood() {
-        assert_eq!(parse("fastsapp:show\n"), Some(ControlCommand::Show));
-        assert_eq!(parse("fastsapp:show"), Some(ControlCommand::Show));
+        assert_eq!(parse("merlin:show\n"), Some(ControlCommand::Show));
+        assert_eq!(parse("merlin:show"), Some(ControlCommand::Show));
         assert_eq!(parse("GET / HTTP/1.1"), None);
-        assert_eq!(parse("fastsapp:frobnicate"), None);
+        assert_eq!(parse("merlin:frobnicate"), None);
+        assert_eq!(parse("fastsapp:show"), None);
         assert_eq!(parse(""), None);
     }
 
@@ -174,7 +179,7 @@ mod tests {
             std::thread::spawn(move || serve(listener, &commands, &waker))
         };
 
-        send_to(port, "show").expect("answered as ZapFast");
+        send_to(port, "show").expect("answered as Merlin");
         // Unknown verbs close the connection without a reply.
         assert!(send_to(port, "frobnicate").is_err());
 

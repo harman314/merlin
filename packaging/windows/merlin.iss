@@ -1,7 +1,7 @@
 ; Windows installer built from a release binary with Inno Setup 6.3 or newer:
 ;
-;   iscc /DVersion=0.1.0 /DArch=x86_64 /DBinary=...\zapfast.exe ^
-;        /DOutputDir=dist packaging\windows\zapfast.iss
+;   iscc /DVersion=0.1.0 /DArch=x86_64 /DBinary=...\merlin.exe ^
+;        /DOutputDir=dist packaging\windows\merlin.iss
 ;
 ; Arch matches the Rust target: x86_64 or aarch64. Installation uses the
 ; current user's Programs folder and does not need administrator rights.
@@ -25,8 +25,8 @@
   #define InnoArch "x64compatible"
 #endif
 
-#define AppName "ZapFast"
-#define AppExeName "zapfast.exe"
+#define AppName "Merlin"
+#define AppExeName "merlin.exe"
 
 [Setup]
 ; Never change: this is how Windows tells an update from a new program.
@@ -35,9 +35,9 @@ AppName={#AppName}
 AppVersion={#Version}
 AppVerName={#AppName} {#Version}
 AppPublisher=Carmine Paolino
-AppPublisherURL=https://zapfast.rocks
-AppSupportURL=https://github.com/crmne/zapfast/issues
-AppUpdatesURL=https://github.com/crmne/zapfast/releases
+AppPublisherURL=https://github.com/harman314/merlin
+AppSupportURL=https://github.com/harman314/merlin/issues
+AppUpdatesURL=https://github.com/harman314/merlin/releases
 DefaultDirName={localappdata}\Programs\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
@@ -47,8 +47,8 @@ ArchitecturesInstallIn64BitMode={#InnoArch}
 MinVersion=10.0
 LicenseFile=..\..\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=zapfast-v{#Version}-{#Arch}-pc-windows-msvc-setup
-SetupIconFile=zapfast.ico
+OutputBaseFilename=merlin-v{#Version}-{#Arch}-pc-windows-msvc-setup
+SetupIconFile=merlin.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -65,18 +65,12 @@ Source: "{#Binary}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
-Source: "zapfast-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "merlin-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
 
-[InstallDelete]
-; AppId keeps upgrades in the existing installation directory. Remove the
-; previous executable and shortcuts so they cannot start the old client.
-Type: files; Name: "{app}\fastsapp.exe"
-Type: files; Name: "{autoprograms}\FastsApp.lnk"
-Type: files; Name: "{autodesktop}\FastsApp.lnk"
 
 [Icons]
-Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; AppUserModelID: "me.paolino.zapfast"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; AppUserModelID: "me.paolino.zapfast"
+Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; AppUserModelID: "rocks.merlin.Merlin"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; AppUserModelID: "rocks.merlin.Merlin"
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

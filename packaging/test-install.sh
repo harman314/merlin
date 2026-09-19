@@ -27,29 +27,29 @@ docker run --rm \
     set -- /packages/*."$FORMAT"
     test "$#" -eq 1
     test -f "$1"
-    mkdir -p /root/.config/zapfast
-    printf "%s\n" "preserve-existing-settings" > /root/.config/zapfast/fixture
+    mkdir -p /root/.config/merlin
+    printf "%s\n" "preserve-existing-settings" > /root/.config/merlin/fixture
     if [ "$FORMAT" = deb ]; then
       apt-get update
       DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$1"
-      dpkg-query -W zapfast
+      dpkg-query -W merlin
     else
       dnf install -y --setopt=install_weak_deps=False "$1"
-      rpm -q zapfast
+      rpm -q merlin
     fi
-    zapfast --version
+    merlin --version
     /checks/check-runtime-libs
-    test -s /usr/share/applications/zapfast.desktop
-    test -s /usr/share/icons/hicolor/scalable/apps/zapfast.svg
-    grep -qx "Icon=zapfast" /usr/share/applications/zapfast.desktop
-    grep -qx "StartupWMClass=zapfast" /usr/share/applications/zapfast.desktop
-    test -s /usr/share/zapfast/omarchy/zapfast.json.tpl
-    test -x /usr/share/zapfast/omarchy/zapfast-theme
-    if [ "$FORMAT" = deb ]; then apt-get remove -y zapfast; else dnf remove -y zapfast; fi
-    test ! -e /usr/bin/zapfast
-    test ! -e /usr/share/applications/zapfast.desktop
-    test ! -e /usr/share/icons/hicolor/scalable/apps/zapfast.svg
-    test ! -e /usr/share/zapfast/omarchy/zapfast.json.tpl
-    test ! -e /usr/share/zapfast/omarchy/zapfast-theme
-    test "$(cat /root/.config/zapfast/fixture)" = preserve-existing-settings
+    test -s /usr/share/applications/merlin.desktop
+    test -s /usr/share/icons/hicolor/scalable/apps/merlin.svg
+    grep -qx "Icon=merlin" /usr/share/applications/merlin.desktop
+    grep -qx "StartupWMClass=merlin" /usr/share/applications/merlin.desktop
+    test -s /usr/share/merlin/omarchy/merlin.json.tpl
+    test -x /usr/share/merlin/omarchy/merlin-theme
+    if [ "$FORMAT" = deb ]; then apt-get remove -y merlin; else dnf remove -y merlin; fi
+    test ! -e /usr/bin/merlin
+    test ! -e /usr/share/applications/merlin.desktop
+    test ! -e /usr/share/icons/hicolor/scalable/apps/merlin.svg
+    test ! -e /usr/share/merlin/omarchy/merlin.json.tpl
+    test ! -e /usr/share/merlin/omarchy/merlin-theme
+    test "$(cat /root/.config/merlin/fixture)" = preserve-existing-settings
   '

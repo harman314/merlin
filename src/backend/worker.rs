@@ -626,7 +626,7 @@ impl Worker {
             // WhatsApp reads the linked-device name, version, and icon at pairing.
             .with_device_props(
                 DevicePropsOverride::new()
-                    .with_os("ZapFast")
+                    .with_os("Merlin")
                     .with_version(app_version())
                     .with_platform_type(wa::device_props::PlatformType::DESKTOP),
             )
@@ -1125,7 +1125,7 @@ impl Worker {
             }
             E::ClientOutdated(_) => {
                 self.set_status(LinkStatus::Failed(
-                    "WhatsApp rejected this version of ZapFast. Update the app".to_owned(),
+                    "WhatsApp rejected this version of Merlin. Update the app".to_owned(),
                 ));
             }
             E::Messages(batch) => {
@@ -1172,7 +1172,7 @@ impl Worker {
                         .set_ephemeral(&chat, *expiration, timestamp)
                         .unwrap_or(false);
                     log::debug!(
-                        target: "zapfast::disappearing",
+                        target: "merlin::disappearing",
                         "group timer update: duration={expiration}s timestamp={timestamp} accepted={accepted}"
                     );
                     if accepted {
@@ -1546,7 +1546,7 @@ impl Worker {
                         .set_ephemeral(&chat, expiration, timestamp)
                         .unwrap_or(false);
                     log::debug!(
-                        target: "zapfast::disappearing",
+                        target: "merlin::disappearing",
                         "protocol timer update: duration={expiration}s timestamp={timestamp} fallback_timestamp={used_fallback} accepted={accepted}"
                     );
                     if accepted {
@@ -1554,7 +1554,7 @@ impl Worker {
                     }
                 } else {
                     log::debug!(
-                        target: "zapfast::disappearing",
+                        target: "merlin::disappearing",
                         "protocol timer update missing expiration"
                     );
                 }
@@ -5856,7 +5856,7 @@ mod receipt_tests {
         let (events, events_rx) = std::sync::mpsc::channel();
         let (commands, inbox) = mpsc::unbounded_channel();
         let (wa_sender, wa_events) = mpsc::unbounded_channel();
-        let root = std::env::temp_dir().join(format!("zapfast-worker-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("merlin-worker-test-{}", std::process::id()));
         let worker = Worker {
             dirs: AppDirs::under(&root),
             events,

@@ -3,12 +3,12 @@
 fn main() {
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        println!("cargo:rerun-if-changed=packaging/windows/zapfast.ico");
+        println!("cargo:rerun-if-changed=packaging/windows/merlin.ico");
         let mut resource = winresource::WindowsResource::new();
         resource
-            .set_icon("packaging/windows/zapfast.ico")
-            .set("ProductName", "ZapFast")
-            .set("FileDescription", "ZapFast");
+            .set_icon("packaging/windows/merlin.ico")
+            .set("ProductName", "Merlin")
+            .set("FileDescription", "Merlin");
         if let Err(error) = resource.compile() {
             println!("cargo:warning=Windows resources not embedded: {error}");
         }

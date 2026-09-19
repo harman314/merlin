@@ -43,10 +43,10 @@ pub(super) fn key_for(path: &Path) -> Result<Zeroizing<[u8; 32]>> {
     let store = apple_native_keyring_store::keychain::Store::new();
     #[cfg(windows)]
     let store = windows_native_keyring_store::Store::new();
-    let store = store.context("Unlock your OS keyring and restart ZapFast")?;
+    let store = store.context("Unlock your OS keyring and restart Merlin")?;
     let entry = store
-        .build("rocks.zapfast.ZapFast", &identity, None)
-        .context("The OS keyring could not open ZapFast's archive key")?;
+        .build("rocks.merlin.Merlin", &identity, None)
+        .context("The OS keyring could not open Merlin's archive key")?;
     key_from_entry(path, &entry)
 }
 
@@ -84,7 +84,7 @@ fn key_from_entry(path: &Path, entry: &keyring_core::Entry) -> Result<Zeroizing<
             );
             Ok(key)
         }
-        Err(error) => Err(error).context("Unlock your OS keyring and restart ZapFast"),
+        Err(error) => Err(error).context("Unlock your OS keyring and restart Merlin"),
     }
 }
 
@@ -216,7 +216,7 @@ mod tests {
         let directory = directory();
         let path = directory.path().join("archive.db");
         let store = keyring_core::mock::Store::new().unwrap();
-        let entry = store.build("zapfast-test", "archive", None).unwrap();
+        let entry = store.build("merlin-test", "archive", None).unwrap();
         let key = key_from_entry(&path, &entry).unwrap();
         assert_eq!(*key, *key_from_entry(&path, &entry).unwrap());
         let connection = open(&path, &key).unwrap();

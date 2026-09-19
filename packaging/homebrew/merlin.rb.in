@@ -1,0 +1,16 @@
+cask "merlin" do
+  version "@VERSION@"
+  sha256 "@MACOS_SHA256@"
+
+  url "https://github.com/harman314/merlin/releases/download/v#{version}/merlin-v#{version}-macos-universal.dmg"
+  name "Merlin"
+  desc "Native WhatsApp client"
+  homepage "https://github.com/harman314/merlin"
+
+  livecheck do
+    url :url
+    strategy :github_latest
+  end
+
+  app "Merlin.app"
+end

@@ -72,7 +72,7 @@ mod tests {
             pairing_phone: Some(phone.into()),
         };
 
-        // The previous Debug formatting leaked every field into zapfast.log.
+        // The previous Debug formatting leaked every field into merlin.log.
         let previous = format!("link: {status:?}");
         assert!(previous.contains(qr));
         assert!(previous.contains(code));
@@ -575,13 +575,13 @@ impl Backend {
         let (event_tx, event_rx) = std::sync::mpsc::channel();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
-            .thread_name("zapfast-runtime")
+            .thread_name("merlin-runtime")
             .enable_all()
             .build()
             .expect("unable to start the async runtime");
         let worker_commands = command_tx.clone();
         let thread = std::thread::Builder::new()
-            .name("zapfast-backend".to_string())
+            .name("merlin-backend".to_string())
             .spawn(move || {
                 runtime.block_on(async move {
                     worker::run(dirs, event_tx, worker_commands, command_rx, waker).await;

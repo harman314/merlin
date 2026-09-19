@@ -1,21 +1,21 @@
 ---
 title: Download
-description: Get ZapFast for Linux, macOS, or Windows, with install instructions for each.
+description: Get Merlin for Linux, macOS, or Windows, with install instructions for each.
 nav_order: 1
 ---
 
-{% assign v = site.zapfast_version %}
+{% assign v = site.merlin_version %}
 {% assign name = site.release_asset_prefix %}
 {% assign app = site.release_app_name %}
-{% assign base = "https://github.com/crmne/zapfast/releases/download/v" | append: v %}
+{% assign base = "https://github.com/harman314/merlin/releases/download/v" | append: v %}
 
-ZapFast was previously called FastsApp. Version 0.13.0 introduces the new
+Merlin was previously called FastsApp. Version 0.13.0 introduces the new
 package and executable names. Your existing session and local data move
-automatically when you first start ZapFast; quit FastsApp before upgrading.
+automatically when you first start Merlin; quit FastsApp before upgrading.
 
 The current version is **v{{ v }}**. SHA-256 checksums are in
 [checksums.txt]({{ base }}/checksums.txt). Older versions are on the
-[releases page](https://github.com/crmne/zapfast/releases).
+[releases page](https://github.com/harman314/merlin/releases).
 
 ## Linux
 
@@ -52,7 +52,7 @@ The app is signed with Developer ID and notarized by Apple. The DMG includes
 a validated notarization ticket.
 
 When upgrading from FastsApp, remove the old FastsApp application bundle
-after installing ZapFast.
+after installing Merlin.
 
 ## Windows
 

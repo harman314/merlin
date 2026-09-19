@@ -13,7 +13,7 @@ import yaml
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
-APP_ID = "rocks.zapfast.ZapFast"
+APP_ID = "rocks.merlin.Merlin"
 
 
 class FlatpakPackaging(unittest.TestCase):

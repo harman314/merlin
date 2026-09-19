@@ -2,13 +2,13 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use zapfast::{app, backend, paths, settings, single_instance};
+use merlin::{app, backend, paths, settings, single_instance};
 
 use clap::Parser;
 
 /// A fast, native WhatsApp client.
 #[derive(Debug, Parser)]
-#[command(name = "zapfast", version, about)]
+#[command(name = "merlin", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Control>,
@@ -68,14 +68,14 @@ struct Cli {
 
 #[derive(Debug, clap::Subcommand)]
 enum Control {
-    /// Reload palettes in an already-running ZapFast without showing its window.
+    /// Reload palettes in an already-running Merlin without showing its window.
     ReloadThemes,
 }
 
 fn main() -> eframe::Result<()> {
     let arguments: Vec<_> = std::env::args_os().collect();
     if arguments.len() == 3 && arguments[1] == "--apply-update" {
-        return zapfast::updates::install::run_helper(std::path::Path::new(&arguments[2]))
+        return merlin::updates::install::run_helper(std::path::Path::new(&arguments[2]))
             .map_err(|error| eframe::Error::AppCreation(error.into()));
     }
     let cli = Cli::parse();
@@ -96,21 +96,21 @@ fn main() -> eframe::Result<()> {
         match single_instance::acquire(&waker) {
             single_instance::Outcome::Only(guard) => Some(guard),
             single_instance::Outcome::Surfaced => {
-                eprintln!("ZapFast or FastsApp is already running; asked it to show its window");
+                eprintln!("Merlin is already running; asked it to show its window");
                 return Ok(());
             }
         }
     };
     let default_filter = if cli.verbose {
-        "info,zapfast=debug,whatsapp_rust=debug,wacore=debug"
+        "info,merlin=debug,whatsapp_rust=debug,wacore=debug"
     } else {
-        "warn,zapfast=info"
+        "warn,merlin=info"
     };
-    // A demo must not create empty ZapFast directories that would prevent a
+    // A demo must not create empty Merlin directories that would prevent a
     // later real launch from adopting the existing FastsApp session.
     let dirs = if demo {
         paths::AppDirs::under(&std::env::temp_dir().join(format!(
-            "zapfast-demo-{}-{}",
+            "merlin-demo-{}-{}",
             std::process::id(),
             jiff::Timestamp::now().as_millisecond(),
         )))
@@ -159,10 +159,10 @@ fn main() -> eframe::Result<()> {
     }
     #[cfg(feature = "demo")]
     if demo {
-        zapfast::demo::populate(&mut app);
-        zapfast::demo::apply_flags(&mut app, cli.demo_page.as_deref());
+        merlin::demo::populate(&mut app);
+        merlin::demo::apply_flags(&mut app, cli.demo_page.as_deref());
         if cli.demo_tour {
-            zapfast::demo::tour::prepare(&mut app);
+            merlin::demo::tour::prepare(&mut app);
         }
     }
     #[cfg(feature = "demo")]
@@ -186,7 +186,7 @@ fn main() -> eframe::Result<()> {
         #[cfg(feature = "demo")]
         let creator_tour_events = cli.demo_tour_events.clone();
         eframe::run_native(
-            "ZapFast",
+            "Merlin",
             native_options(demo_persistence.clone()),
             Box::new(move |cc| {
                 creator_waker.attach(&cc.egui_ctx);
@@ -198,7 +198,7 @@ fn main() -> eframe::Result<()> {
                 app.attach(&cc.egui_ctx);
                 #[cfg(feature = "demo")]
                 if cli.demo_macos {
-                    zapfast::theme::preview_macos(&cc.egui_ctx);
+                    merlin::theme::preview_macos(&cc.egui_ctx);
                 }
                 Ok(Box::new(Shell {
                     app: Some(app),
@@ -208,7 +208,7 @@ fn main() -> eframe::Result<()> {
                     shot: creator_shot,
                     #[cfg(feature = "demo")]
                     tour: cli.demo_tour.then(|| {
-                        zapfast::demo::tour::Tour::new(
+                        merlin::demo::tour::Tour::new(
                             cli.demo_tour_delay.map(std::time::Duration::from_millis),
                             creator_tour_events,
                         )
@@ -243,7 +243,7 @@ fn main() -> eframe::Result<()> {
                     break;
                 }
             }
-            zapfast::tray::idle(std::time::Duration::from_millis(150));
+            merlin::tray::idle(std::time::Duration::from_millis(150));
         }
         let quit = slot
             .lock()
@@ -286,7 +286,7 @@ fn log_panics(path: std::path::PathBuf) {
         previous(info);
         let thread = std::thread::current();
         let entry = format!(
-            "{} zapfast {} on thread {:?}: {info}\n",
+            "{} merlin {} on thread {:?}: {info}\n",
             jiff::Timestamp::now(),
             env!("CARGO_PKG_VERSION"),
             thread.name().unwrap_or("unnamed"),
@@ -315,11 +315,11 @@ fn native_options(demo_persistence: Option<std::path::PathBuf>) -> eframe::Nativ
     let demo_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
     let demo = demo_persistence.is_some();
     let viewport = egui::ViewportBuilder::default()
-        .with_title(if demo { "ZapFast Demo" } else { "ZapFast" })
+        .with_title(if demo { "Merlin Demo" } else { "Merlin" })
         .with_app_id(if demo {
-            "zapfast-demo".to_owned()
+            "merlin-demo".to_owned()
         } else {
-            std::env::var("FLATPAK_ID").unwrap_or_else(|_| "zapfast".to_owned())
+            std::env::var("FLATPAK_ID").unwrap_or_else(|_| "merlin".to_owned())
         })
         .with_inner_size(demo_size)
         .with_min_inner_size([720.0, 480.0])
@@ -351,7 +351,7 @@ struct Shell {
     #[cfg(feature = "demo")]
     shot: Option<Shot>,
     #[cfg(feature = "demo")]
-    tour: Option<zapfast::demo::tour::Tour>,
+    tour: Option<merlin::demo::tour::Tour>,
 }
 
 impl Drop for Shell {
@@ -429,7 +429,7 @@ impl eframe::App for Shell {
             }
             app.background_frame(ctx);
             #[cfg(target_os = "macos")]
-            zapfast::macos::update_window(_frame, ctx, app.is_linked());
+            merlin::macos::update_window(_frame, ctx, app.is_linked());
         }
         #[cfg(feature = "demo")]
         {
@@ -451,7 +451,7 @@ impl eframe::App for Shell {
             app.frame_ui(ui);
             if let Some(receipt) = self.update_receipt.take() {
                 std::thread::spawn(move || {
-                    if let Err(error) = zapfast::updates::install::acknowledge(&receipt) {
+                    if let Err(error) = merlin::updates::install::acknowledge(&receipt) {
                         log::warn!("could not acknowledge the update: {error:#}");
                     }
                 });
@@ -488,7 +488,7 @@ fn app_icon() -> egui::IconData {
     {
         const SIZE: usize = 128;
         egui::IconData {
-            rgba: zapfast::util::app_icon_rgba(SIZE),
+            rgba: merlin::util::app_icon_rgba(SIZE),
             width: SIZE as u32,
             height: SIZE as u32,
         }
@@ -501,13 +501,13 @@ mod tests {
 
     #[test]
     fn tour_cli_accepts_manual_and_delayed_starts() {
-        let cli = Cli::try_parse_from(["zapfast", "--demo-tour"]).unwrap();
+        let cli = Cli::try_parse_from(["merlin", "--demo-tour"]).unwrap();
         assert!(cli.demo_tour);
         assert!(cli.demo_tour_delay.is_none());
         let cli =
-            Cli::try_parse_from(["zapfast", "--demo-tour", "--demo-tour-delay", "5000"]).unwrap();
+            Cli::try_parse_from(["merlin", "--demo-tour", "--demo-tour-delay", "5000"]).unwrap();
         assert_eq!(cli.demo_tour_delay, Some(5000));
-        assert!(Cli::try_parse_from(["zapfast", "--demo-tour-delay", "5000"]).is_err());
-        assert!(Cli::try_parse_from(["zapfast", "--demo-tour", "--demo-page", "login",]).is_err());
+        assert!(Cli::try_parse_from(["merlin", "--demo-tour-delay", "5000"]).is_err());
+        assert!(Cli::try_parse_from(["merlin", "--demo-tour", "--demo-page", "login",]).is_err());
     }
 }

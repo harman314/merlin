@@ -1,21 +1,21 @@
 [package]
-name = "zapfast"
+name = "merlin"
 version = "0.14.0"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
 description = "A native WhatsApp client built with Rust and egui"
-homepage = "https://zapfast.rocks"
-repository = "https://github.com/crmne/zapfast"
+homepage = "https://github.com/harman314/merlin"
+repository = "https://github.com/harman314/merlin"
 keywords = ["whatsapp", "chat", "egui", "messaging"]
 categories = ["gui"]
 
 [lib]
-name = "zapfast"
+name = "merlin"
 path = "src/lib.rs"
 
 [[bin]]
-name = "zapfast"
+name = "merlin"
 path = "src/main.rs"
 
 [dependencies]
