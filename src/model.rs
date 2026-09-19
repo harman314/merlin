@@ -620,6 +620,8 @@ pub enum Action {
     CancelRecording,
     SendRecording,
     OpenFile(PathBuf),
+    /// Opens a file in the system's own preview panel.
+    QuickLook(PathBuf),
     /// Opens an attachment in the in-app viewer.
     Preview {
         chat: ChatId,

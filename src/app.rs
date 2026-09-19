@@ -2051,6 +2051,14 @@ impl App {
                     self.toast_error(format!("Could not open {}: {error}", path.display()));
                 }
             }
+            Action::QuickLook(path) => {
+                // Falls back to the desktop handler where there is no panel.
+                if !crate::preview::show(&[&path])
+                    && let Err(error) = open::that_detached(&path)
+                {
+                    self.toast_error(format!("Could not open {}: {error}", path.display()));
+                }
+            }
             Action::Preview { chat, message } => self.viewer = Some((chat, message)),
             Action::CloseViewer => self.viewer = None,
             Action::StepViewer(step) => self.step_viewer(step),
@@ -3019,8 +3027,9 @@ pub fn wants_paste(input: &egui::InputState) -> bool {
 pub fn viewable(content: &Content) -> bool {
     match content {
         Content::Image { media, .. } | Content::Video { media, .. } => media.path.is_some(),
-        // Documents render through the system thumbnailer, where there is one.
-        Content::Document { media, .. } => media.path.is_some() && crate::quicklook::available(),
+        // Documents open in the system's own preview panel instead, which pages
+        // and scrolls them rather than showing a still first page.
+        Content::Document { .. } => false,
         _ => false,
     }
 }

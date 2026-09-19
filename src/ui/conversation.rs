@@ -3379,14 +3379,9 @@ fn attachment(
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.clicked() && !auto {
         match &media.path {
-            // The viewer shows documents where the system can render them, and
-            // hands the rest to the desktop as before.
-            Some(path) => actions.push(open_media(
-                view,
-                message,
-                path,
-                !crate::quicklook::available(),
-            )),
+            // Documents go to the system preview panel, which pages through
+            // them. Anything it cannot show falls back to the desktop.
+            Some(path) => actions.push(Action::QuickLook(path.clone())),
             None if !matches!(media.state, MediaState::Downloading) => {
                 actions.push(Action::Download {
                     chat: view.chat.id.clone(),

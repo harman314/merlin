@@ -1372,7 +1372,7 @@ mod tests {
     }
 
     #[test]
-    fn clicking_a_document_opens_the_viewer_where_the_system_can_preview_it() {
+    fn a_document_goes_to_the_system_panel_not_the_in_app_viewer() {
         let mut app = app();
         let ctx = egui::Context::default();
         app.attach(&ctx);
@@ -1392,26 +1392,16 @@ mod tests {
             message.id.clone()
         };
 
-        // Without a system thumbnailer the document stays with the desktop.
-        crate::quicklook::force_available(false);
-        assert!(!app.viewable(&chat).contains(&id));
-
-        crate::quicklook::force_available(true);
+        // The in-app viewer steps through pictures and video. A document pages
+        // and scrolls, which the system's own panel already does.
         assert!(
-            app.viewable(&chat).contains(&id),
-            "a downloaded document should be viewable where previews exist"
+            !app.viewable(&chat).contains(&id),
+            "documents belong to the system panel, not the viewer"
         );
-        app.actions.push(crate::model::Action::Preview {
-            chat: chat.clone(),
-            message: id.clone(),
-        });
-        render(&mut app, &ctx);
-        assert_eq!(
-            app.viewer,
-            Some((chat, id)),
-            "the viewer should stay open rather than close itself on the first frame"
+        assert!(
+            app.viewable(&chat).iter().all(|known| *known != id),
+            "and never appear when stepping through the viewer"
         );
-        crate::quicklook::force_available(false);
     }
 
     #[test]
