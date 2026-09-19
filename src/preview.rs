@@ -7,8 +7,22 @@
 
 use std::path::Path;
 
+/// Pretends a panel exists, so the routing can be tested away from macOS.
+/// Opening one still does nothing there.
+#[cfg(any(test, feature = "demo"))]
+static FORCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(any(test, feature = "demo"))]
+pub fn force_available(on: bool) {
+    FORCED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Whether this platform has a system preview panel.
 pub fn available() -> bool {
+    #[cfg(any(test, feature = "demo"))]
+    if FORCED.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
     cfg!(target_os = "macos")
 }
 

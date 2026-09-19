@@ -1372,7 +1372,7 @@ mod tests {
     }
 
     #[test]
-    fn a_document_goes_to_the_system_panel_not_the_in_app_viewer() {
+    fn a_document_joins_the_set_the_system_panel_arrows_through() {
         let mut app = app();
         let ctx = egui::Context::default();
         app.attach(&ctx);
@@ -1392,15 +1392,20 @@ mod tests {
             message.id.clone()
         };
 
-        // The in-app viewer steps through pictures and video. A document pages
-        // and scrolls, which the system's own panel already does.
+        // With a panel the document sits among the pictures and video, so the
+        // panel's arrows carry on past it instead of stopping at it.
+        crate::preview::force_available(true);
+        assert!(
+            app.viewable(&chat).contains(&id),
+            "a document belongs in the set handed to the system panel"
+        );
+
+        // Without one it must stay out: the in-app viewer cannot render it,
+        // and stepping onto it would close the viewer.
+        crate::preview::force_available(false);
         assert!(
             !app.viewable(&chat).contains(&id),
-            "documents belong to the system panel, not the viewer"
-        );
-        assert!(
-            app.viewable(&chat).iter().all(|known| *known != id),
-            "and never appear when stepping through the viewer"
+            "the in-app viewer shows pictures and video only"
         );
     }
 

@@ -3379,9 +3379,18 @@ fn attachment(
         .on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.clicked() && !auto {
         match &media.path {
-            // Documents go to the system preview panel, which pages through
-            // them. Anything it cannot show falls back to the desktop.
-            Some(path) => actions.push(Action::QuickLook(path.clone())),
+            // A document opens with the rest of the chat's attachments around
+            // it, so the panel's arrows carry on past it. Where there is no
+            // panel it goes straight to the desktop, since the in-app viewer
+            // cannot render documents.
+            Some(path) => actions.push(if crate::preview::available() {
+                Action::Preview {
+                    chat: view.chat.id.clone(),
+                    message: message.id.clone(),
+                }
+            } else {
+                Action::QuickLook(path.clone())
+            }),
             None if !matches!(media.state, MediaState::Downloading) => {
                 actions.push(Action::Download {
                     chat: view.chat.id.clone(),
