@@ -3056,11 +3056,17 @@ pub fn wants_paste(input: &egui::InputState) -> bool {
 pub fn viewable(content: &Content) -> bool {
     match content {
         Content::Image { media, .. } | Content::Video { media, .. } => media.path.is_some(),
-        // Documents join the set only where the system panel can show them.
-        // They belong in it: the panel's arrows should walk a chat's whole
-        // run of attachments, not stop at the first file that is not a
-        // picture. The in-app viewer used elsewhere cannot render them.
-        Content::Document { media, .. } => media.path.is_some() && crate::preview::available(),
+        // Documents and audio join the set only where the system panel can
+        // show them. They belong in it: the panel's arrows should walk a
+        // chat's whole run of attachments, not stop at the first file that is
+        // not a picture. The in-app viewer used elsewhere cannot render them.
+        //
+        // Being in the sequence does not change what clicking them does. Audio
+        // still plays in its bubble, with the waveform and the speed control,
+        // which beats a panel for a voice note.
+        Content::Document { media, .. } | Content::Audio { media, .. } => {
+            media.path.is_some() && crate::preview::available()
+        }
         _ => false,
     }
 }
