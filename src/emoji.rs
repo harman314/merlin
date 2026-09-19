@@ -25,8 +25,31 @@ pub const PLACEHOLDER: char = '\u{2B1B}';
 /// Cached emoji bitmap size.
 const TEXTURE_WIDTH: u32 = 72;
 
+/// Where a font's bytes live.
+///
+/// The system emoji font is large, 180 MB on recent macOS, and only a handful
+/// of its glyphs are ever drawn. Mapping it keeps those bytes in the page cache
+/// under the kernel's control instead of copying all of them onto the heap for
+/// the life of the process. The bundled fallback is already in the binary, so
+/// it is borrowed rather than copied.
+enum Bytes {
+    Mapped(memmap2::Mmap),
+    Static(&'static [u8]),
+}
+
+impl std::ops::Deref for Bytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Mapped(map) => map,
+            Self::Static(bytes) => bytes,
+        }
+    }
+}
+
 struct Font {
-    bytes: Vec<u8>,
+    bytes: Bytes,
     index: u32,
     /// Maps a glyph sequence to its ligature glyph.
     ligatures: HashMap<Vec<u32>, u32>,
@@ -55,15 +78,19 @@ fn font() -> Option<&'static Font> {
 
 fn load() -> Option<Font> {
     if let Some((path, index)) = find()
-        && let Ok(bytes) = std::fs::read(&path)
-        && let Some(font) = load_bytes(bytes, index, &path.display().to_string())
+        && let Ok(file) = std::fs::File::open(&path)
+        // SAFETY: an installed font file. A concurrent truncation would fault
+        // on read, the same hazard the font scanner already accepts for its
+        // own mapping.
+        && let Ok(map) = (unsafe { memmap2::Mmap::map(&file) })
+        && let Some(font) = load_bytes(Bytes::Mapped(map), index, &path.display().to_string())
     {
         return Some(font);
     }
-    load_bytes(BUNDLED.to_vec(), 0, "bundled Noto Color Emoji")
+    load_bytes(Bytes::Static(BUNDLED), 0, "bundled Noto Color Emoji")
 }
 
-fn load_bytes(bytes: Vec<u8>, index: u32, source: &str) -> Option<Font> {
+fn load_bytes(bytes: Bytes, index: u32, source: &str) -> Option<Font> {
     let font = FontRef::from_index(&bytes, index).ok()?;
     if font.bitmap_strikes().is_empty() {
         log::info!("{source} has no bitmap emoji");
@@ -506,7 +533,7 @@ mod tests {
 
     #[test]
     fn the_bundled_font_renders_colour_emoji() {
-        let font = load_bytes(BUNDLED.to_vec(), 0, "test font").expect("bundled font");
+        let font = load_bytes(Bytes::Static(BUNDLED), 0, "test font").expect("bundled font");
         let font_ref = font.font_ref().expect("font face");
         let glyph = font
             .glyph(&font_ref, &['\u{1F600}'])
