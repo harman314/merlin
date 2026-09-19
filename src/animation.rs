@@ -52,11 +52,20 @@ enum Entry {
     Ready(Playing),
 }
 
+/// What to decode. The same file can be wanted as a still first frame in the
+/// message list and as full playback in the viewer, so the frame limit is part
+/// of the key and the two never share an entry.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Request {
+    path: PathBuf,
+    limit: usize,
+}
+
 #[derive(Clone, Default)]
-struct Cache(Arc<Mutex<HashMap<PathBuf, Entry>>>);
+struct Cache(Arc<Mutex<HashMap<Request, Entry>>>);
 
 /// Result returned by a decoder thread.
-type Delivery = (PathBuf, Option<Decoded>);
+type Delivery = (Request, Option<Decoded>);
 
 /// Decoded frames waiting for texture upload.
 #[derive(Clone, Default)]
@@ -88,6 +97,22 @@ pub enum Frame {
 
 /// Returns the current frame, starting decoding when needed. Schedules the next repaint.
 pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
+    show(ui, path, rect, MAX_FRAMES)
+}
+
+/// Returns a video's own first frame, for one that arrived without a poster.
+///
+/// A single-frame entry schedules no repaints, so this costs one texture and
+/// then sits still, and it shares the eviction the animations already have.
+pub fn poster(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
+    show(ui, path, rect, 1)
+}
+
+fn show(ui: &egui::Ui, path: &Path, rect: egui::Rect, limit: usize) -> Frame {
+    let want = Request {
+        path: path.to_path_buf(),
+        limit,
+    };
     // ScrollArea still lays out clipped rows. They must neither start decoders
     // nor keep the window repainting while their pixels are off screen.
     if !ui.is_rect_visible(rect) {
@@ -100,7 +125,7 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
     let arrived: Vec<Delivery> =
         std::mem::take(&mut *inbox.0.lock().unwrap_or_else(|p| p.into_inner()));
     let mut entries = cache.0.lock().unwrap_or_else(|p| p.into_inner());
-    for (arrived_path, decoded) in arrived {
+    for (arrived_request, decoded) in arrived {
         let entry = match decoded {
             Some(decoded) if !decoded.frames.is_empty() => {
                 let mut total = Duration::ZERO;
@@ -110,7 +135,11 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
                     .enumerate()
                     .map(|(index, (image, delay))| {
                         total += delay;
-                        let name = format!("{}#{index}", arrived_path.display());
+                        let name = format!(
+                            "{}#{index}@{}",
+                            arrived_request.path.display(),
+                            arrived_request.limit
+                        );
                         (ctx.load_texture(name, image, TextureOptions::LINEAR), delay)
                     })
                     .collect();
@@ -123,7 +152,7 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
             }
             _ => Entry::Failed,
         };
-        entries.insert(arrived_path, entry);
+        entries.insert(arrived_request, entry);
     }
     // Remove idle and least-recently-used animations.
     let now = Instant::now();
@@ -142,7 +171,7 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
         let victim = entries
             .iter()
             .filter_map(|(entry_path, entry)| match entry {
-                Entry::Ready(playing) if entry_path.as_path() != path => {
+                Entry::Ready(playing) if entry_path != &want => {
                     Some((entry_path.clone(), playing.last_drawn, playing.frames.len()))
                 }
                 _ => None,
@@ -154,7 +183,7 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
         entries.remove(&victim);
         resident -= count;
     }
-    match entries.get_mut(path) {
+    match entries.get_mut(&want) {
         Some(Entry::Ready(playing)) => {
             playing.last_drawn = now;
             let elapsed = now.duration_since(playing.started);
@@ -185,17 +214,18 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
             }
             DECODING.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
             let slot = DecodeSlot;
-            entries.insert(path.to_path_buf(), Entry::Decoding);
-            let file = path.to_path_buf();
+            entries.insert(want.clone(), Entry::Decoding);
+            let file = want.clone();
             let ctx = ctx.clone();
             let spawned = std::thread::Builder::new()
                 .name("animation-decode".into())
                 .spawn(move || {
                     let _slot = slot;
                     // Convert decoder panics to failed results.
-                    let decoded =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| decode(&file)))
-                            .unwrap_or(None);
+                    let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        decode(&file.path, file.limit)
+                    }))
+                    .unwrap_or(None);
                     inbox
                         .0
                         .lock()
@@ -204,7 +234,7 @@ pub fn frame(ui: &egui::Ui, path: &Path, rect: egui::Rect) -> Frame {
                     ctx.request_repaint();
                 });
             if spawned.is_err() {
-                entries.insert(path.to_path_buf(), Entry::Failed);
+                entries.insert(want, Entry::Failed);
                 return Frame::Unavailable;
             }
             Frame::Pending
@@ -230,23 +260,23 @@ fn ffmpeg_present() -> bool {
     })
 }
 
-fn decode(path: &Path) -> Option<Decoded> {
+fn decode(path: &Path, limit: usize) -> Option<Decoded> {
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.to_ascii_lowercase())
         .unwrap_or_default();
     match extension.as_str() {
-        "webp" | "gif" => decode_image(path, &extension),
-        _ => decode_video(path),
+        "webp" | "gif" => decode_image(path, &extension, limit),
+        _ => decode_video(path, limit),
     }
 }
 
 /// Decodes animated GIF with the `image` crate.
-fn decode_image(path: &Path, extension: &str) -> Option<Decoded> {
+fn decode_image(path: &Path, extension: &str, limit: usize) -> Option<Decoded> {
     use image::AnimationDecoder;
     if extension != "gif" {
-        return decode_webp(path);
+        return decode_webp(path, limit);
     }
     let file = std::fs::File::open(path).ok()?;
     let reader = std::io::BufReader::new(file);
@@ -254,7 +284,7 @@ fn decode_image(path: &Path, extension: &str) -> Option<Decoded> {
         .ok()?
         .into_frames();
     let mut decoded = Vec::new();
-    for frame in frames.take(MAX_FRAMES) {
+    for frame in frames.take(limit) {
         let frame = frame.ok()?;
         let (numerator, denominator) = frame.delay().numer_denom_ms();
         let delay = Duration::from_millis(u64::from(numerator / denominator.max(1)).max(20));
@@ -266,20 +296,21 @@ fn decode_image(path: &Path, extension: &str) -> Option<Decoded> {
 
 /// Decodes animated WebP with libwebp. It returns complete canvas frames,
 /// unlike the `image` decoder, which did not apply frame disposal correctly.
-fn decode_webp(path: &Path) -> Option<Decoded> {
+fn decode_webp(path: &Path, limit: usize) -> Option<Decoded> {
     let bytes = std::fs::read(path).ok()?;
     let decoder = webp_animation::Decoder::new(&bytes).ok()?;
     let (width, height) = decoder.dimensions();
     let mut decoded = Vec::new();
     let mut previous = 0i64;
-    for frame in decoder.into_iter().take(MAX_FRAMES) {
+    for frame in decoder.into_iter().take(limit) {
         let image = image::RgbaImage::from_raw(width, height, frame.data().to_vec())?;
         let delay = (i64::from(frame.timestamp()) - previous).max(20) as u64;
         previous = i64::from(frame.timestamp());
         decoded.push((to_color_image(&image), Duration::from_millis(delay)));
     }
-    // Single-frame files use the static-image path.
-    (decoded.len() > 1).then_some(Decoded { frames: decoded })
+    // Single-frame files use the static-image path, unless one frame is all
+    // that was asked for.
+    (decoded.len() > 1 || limit == 1).then_some(Decoded { frames: decoded })
 }
 
 fn to_color_image(image: &image::RgbaImage) -> ColorImage {
@@ -301,13 +332,13 @@ fn to_color_image(image: &image::RgbaImage) -> ColorImage {
 }
 
 /// Decodes MP4 to scaled RGBA frames with `ffmpeg`.
-fn decode_video(path: &Path) -> Option<Decoded> {
+fn decode_video(path: &Path, limit: usize) -> Option<Decoded> {
     // Decode WhatsApp's H.264 MP4s in-process and use ffmpeg for other codecs.
-    decode_mp4(path).or_else(|| decode_with_ffmpeg(path))
+    decode_mp4(path, limit).or_else(|| decode_with_ffmpeg(path, limit))
 }
 
 /// Decodes an MP4 video track in-process.
-fn decode_mp4(path: &Path) -> Option<Decoded> {
+fn decode_mp4(path: &Path, limit: usize) -> Option<Decoded> {
     let file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
     let mut mp4 = mp4::Mp4Reader::read_header(std::io::BufReader::new(file), size).ok()?;
@@ -333,7 +364,7 @@ fn decode_mp4(path: &Path) -> Option<Decoded> {
     push_annex_b(&mut parameters, &pps);
     let _ = decoder.decode(&parameters);
     for sample_id in 1..=count {
-        if frames.len() >= MAX_FRAMES {
+        if frames.len() >= limit {
             break;
         }
         let Ok(Some(sample)) = mp4.read_sample(track_id, sample_id) else {
@@ -353,7 +384,7 @@ fn decode_mp4(path: &Path) -> Option<Decoded> {
     }
     if let Ok(rest) = decoder.flush_remaining() {
         for yuv in &rest {
-            if frames.len() >= MAX_FRAMES {
+            if frames.len() >= limit {
                 break;
             }
             let delay = delays.pop_front().unwrap_or(Duration::from_millis(66));
@@ -413,7 +444,7 @@ fn avcc_to_annex_b(out: &mut Vec<u8>, sample: &[u8]) {
     }
 }
 
-fn decode_with_ffmpeg(path: &Path) -> Option<Decoded> {
+fn decode_with_ffmpeg(path: &Path, limit: usize) -> Option<Decoded> {
     if !ffmpeg_present() {
         return None;
     }
@@ -465,7 +496,7 @@ fn decode_with_ffmpeg(path: &Path) -> Option<Decoded> {
     let mut frames = Vec::new();
     let delay = Duration::from_millis(1000 / u64::from(fps));
     let mut buffer = vec![0u8; frame_bytes];
-    while frames.len() < MAX_FRAMES {
+    while frames.len() < limit {
         if stdout.read_exact(&mut buffer).is_err() {
             break;
         }
@@ -544,7 +575,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("dir");
         let path = dir.join("moving.webp");
         std::fs::write(&path, &webp).expect("writes");
-        let decoded = decode(&path).expect("decodes");
+        let decoded = decode(&path, MAX_FRAMES).expect("decodes");
         assert_eq!(decoded.frames.len(), 2);
         let second = &decoded.frames[1].0;
         let old = second.pixels[8 * second.width() + 8];
@@ -576,7 +607,7 @@ mod tests {
                 encoder.encode_frame(frame).expect("frame");
             }
         }
-        let decoded = decode(&path).expect("decodes");
+        let decoded = decode(&path, MAX_FRAMES).expect("decodes");
         assert_eq!(decoded.frames.len(), 2);
         assert_eq!(decoded.frames[0].1, Duration::from_millis(100));
         let _ = std::fs::remove_dir_all(dir);
@@ -608,7 +639,7 @@ mod tests {
             // Skip when this ffmpeg lacks the encoder.
             return;
         }
-        let decoded = decode(&path).expect("decodes");
+        let decoded = decode(&path, MAX_FRAMES).expect("decodes");
         // Five frames at 10 fps. The in-process path preserves their timing.
         assert_eq!(decoded.frames.len(), 5);
         assert_eq!(decoded.frames[0].1, Duration::from_millis(100));
@@ -624,7 +655,7 @@ mod tests {
         image::RgbaImage::from_pixel(4, 4, image::Rgba([1, 2, 3, 255]))
             .save(&path)
             .expect("saves");
-        assert!(decode(&path).is_none());
+        assert!(decode(&path, MAX_FRAMES).is_none());
         let _ = std::fs::remove_dir_all(dir);
     }
 }
@@ -642,7 +673,7 @@ mod probe {
             return;
         };
         let started = Instant::now();
-        let decoded = decode_mp4(Path::new(&path)).expect("decodes in-process");
+        let decoded = decode_mp4(Path::new(&path), MAX_FRAMES).expect("decodes in-process");
         eprintln!(
             "{} frames of {:?}, first delay {:?}, in {:?}",
             decoded.frames.len(),

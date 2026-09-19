@@ -3137,7 +3137,11 @@ fn video(
     actions: &mut Vec<Action>,
 ) -> f32 {
     let palette = view.palette;
-    let Some(thumbnail) = message.thumbnail.as_deref() else {
+    // A video whose sender attached no poster can still show its own first
+    // frame once the file is here. With neither it stays a file row.
+    let own_poster = message.thumbnail.is_none() && media.path.is_some();
+    let thumbnail = message.thumbnail.as_deref();
+    if thumbnail.is_none() && !own_poster {
         let title = if gif { "GIF" } else { "Video" };
         let mut detail = Vec::new();
         if let Some(seconds) = seconds {
@@ -3156,8 +3160,8 @@ fn video(
             actions,
         );
         return width;
-    };
-    let uri = thumbnail_uri(ui.ctx(), &message.chat, &message.id, thumbnail);
+    }
+    let uri = thumbnail.map(|bytes| thumbnail_uri(ui.ctx(), &message.chat, &message.id, bytes));
     let size = frame_size(media, Some((16, 9)), width.min(PICTURE_WIDTH));
     // Play downloaded GIFs in place; keep a poster for other videos.
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -3183,18 +3187,40 @@ fn video(
         }
         return size.x;
     }
+    let decoded = match (&media.path, own_poster) {
+        (Some(path), true) => Some(animation::poster(ui, path, rect)),
+        _ => None,
+    };
     if ui.is_rect_visible(rect) {
-        egui::Image::new(uri)
-            .fit_to_exact_size(size)
-            .corner_radius(6.0)
-            .paint_at(ui, rect);
+        match (&uri, &decoded) {
+            (Some(uri), _) => {
+                egui::Image::new(uri.clone())
+                    .fit_to_exact_size(size)
+                    .corner_radius(6.0)
+                    .paint_at(ui, rect);
+            }
+            (None, Some(animation::Frame::Ready(texture))) => {
+                ui.painter().image(
+                    texture.id(),
+                    rect,
+                    Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+                    Color32::WHITE,
+                );
+            }
+            _ => {
+                ui.painter().rect_filled(rect, 6.0, palette.surface);
+            }
+        }
         ui.painter()
             .rect_filled(rect, 6.0, Color32::from_black_alpha(40));
         let disc = Rect::from_center_size(rect.center(), Vec2::splat(48.0));
         ui.painter()
             .circle_filled(disc.center(), 24.0, Color32::from_black_alpha(140));
         match (&media.path, &media.state) {
-            (Some(_), _) if matches!(playing, Some(animation::Frame::Pending)) => {
+            (Some(_), _)
+                if matches!(playing, Some(animation::Frame::Pending))
+                    || matches!(decoded, Some(animation::Frame::Pending)) =>
+            {
                 theme::paint_spinner(ui, disc, 24.0, Color32::WHITE)
             }
             (Some(_), _) => theme::paint_icon(ui, Icon::ExternalLink, disc, 22.0, Color32::WHITE),
