@@ -1640,11 +1640,16 @@ impl App {
             .values()
             .map(|conversation| conversation.messages.len())
             .sum();
+        // Fonts are mapped rather than read, so these bytes sit in the page
+        // cache and the kernel can reclaim them. Reported to tell the two apart.
+        let fonts = crate::emoji::mapped_bytes() + crate::system_fonts::mapped_bytes();
         log::debug!(
-            "memory: textures {} MB in {} ({}); {chats} chats loaded holding {messages} messages",
+            "memory: textures {} MB in {} ({}); fonts mapped {} MB; \
+             {chats} chats loaded holding {messages} messages",
             total / 1_048_576,
             manager.num_allocated(),
-            detail.join(", ")
+            detail.join(", "),
+            fonts / 1_048_576
         );
     }
 

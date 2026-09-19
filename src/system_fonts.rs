@@ -12,7 +12,9 @@ use skrifa::MetadataProvider as _;
 /// Registered fallback name, font bytes, and face index.
 pub struct Fallback {
     pub name: String,
-    pub bytes: Vec<u8>,
+    /// Mapped, not read. These are the system's large CJK and Indic faces, and
+    /// egui borrows them rather than copying, so the heap never holds them.
+    pub bytes: memmap2::Mmap,
     pub index: u32,
 }
 
@@ -84,6 +86,11 @@ struct Candidate {
     index: u32,
 }
 
+/// Bytes mapped for fallback faces, for the memory report.
+pub fn mapped_bytes() -> usize {
+    fallbacks().iter().map(|font| font.bytes.len()).sum()
+}
+
 /// Finds and reads the best installed face for each [`FALLBACK_SCRIPTS`] entry.
 fn load() -> Vec<Fallback> {
     let han = han_region(&locale());
@@ -110,7 +117,11 @@ fn load() -> Vec<Fallback> {
         if taken.contains(&(candidate.path.clone(), candidate.index)) {
             continue;
         }
-        let bytes = match std::fs::read(&candidate.path) {
+        let bytes = match std::fs::File::open(&candidate.path)
+            // SAFETY: an installed font file, mapped the same way the probe
+            // above already maps every face it inspects.
+            .and_then(|file| unsafe { memmap2::Mmap::map(&file) })
+        {
             Ok(bytes) => bytes,
             Err(error) => {
                 log::warn!("cannot read {}: {error}", candidate.path.display());

@@ -62,6 +62,11 @@ static FONT: OnceLock<Option<Font>> = OnceLock::new();
 /// rasterize.
 const BUNDLED: &[u8] = include_bytes!("../assets/fonts/NotoColorEmoji.ttf");
 
+/// Bytes the emoji font occupies, for the memory report. Mapped, not heap.
+pub fn mapped_bytes() -> usize {
+    font().map_or(0, |font| font.bytes.len())
+}
+
 /// Whether a color emoji font is available.
 pub fn available() -> bool {
     font().is_some()
