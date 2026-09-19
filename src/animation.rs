@@ -22,7 +22,7 @@ const IDLE: Duration = Duration::from_secs(20);
 /// Maximum concurrent decoders.
 const MAX_DECODERS: usize = 2;
 /// Global texture-frame budget. Least-recently-used animations are removed first.
-const MAX_RESIDENT_FRAMES: usize = 450;
+const MAX_RESIDENT_FRAMES: usize = 180;
 
 static DECODING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -314,14 +314,13 @@ fn decode_webp(path: &Path, limit: usize) -> Option<Decoded> {
 }
 
 fn to_color_image(image: &image::RgbaImage) -> ColorImage {
-    let image = if image.width() > MAX_WIDTH {
-        let height = (image.height() * MAX_WIDTH / image.width()).max(1);
-        image::imageops::resize(
-            image,
-            MAX_WIDTH,
-            height,
-            image::imageops::FilterType::Triangle,
-        )
+    // Both sides are capped. Limiting only the width let a tall sticker cost
+    // several times what a wide one does, for the same place on screen.
+    let image = if image.width() > MAX_WIDTH || image.height() > MAX_WIDTH {
+        let scale = f64::from(MAX_WIDTH) / f64::from(image.width().max(image.height()));
+        let width = ((f64::from(image.width()) * scale) as u32).max(1);
+        let height = ((f64::from(image.height()) * scale) as u32).max(1);
+        image::imageops::resize(image, width, height, image::imageops::FilterType::Triangle)
     } else {
         image.clone()
     };

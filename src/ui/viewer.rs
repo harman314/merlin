@@ -228,10 +228,9 @@ fn paint(
             }
         };
     }
-    // Twice the canvas, so it stays sharp on a dense display and while zoomed a
-    // little, without holding the camera-resolution decode of every picture
-    // opened this session.
-    match crate::thumbs::scaled(ui.ctx(), &open.path, canvas.size() * 2.0) {
+    // The canvas, not a multiple of it. A picture decoded for zooming costs
+    // more than everything else in the cache put together.
+    match crate::thumbs::scaled(ui.ctx(), &open.path, canvas.size()) {
         crate::thumbs::Thumb::Ready(texture) => {
             let natural = texture.size_vec2();
             let rect = fit(canvas, natural, transform);

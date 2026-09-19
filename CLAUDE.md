@@ -65,11 +65,17 @@ the bubble edge.
 The project's claim is that it opens in under a second and idles near 150 MB.
 Treat that as a budget.
 
-**Do not regress `src/animation.rs`.** It is the model the rest should copy:
-capped frame width and count, true least-recently-used eviction, a twenty
-second drain after the last draw, limited concurrent decoders, and an early
-return when a row is off screen. Its budget is the one number someone might
-"optimise" upward.
+**Copy `src/animation.rs`'s shape**: capped frame size and count, true
+least-recently-used eviction, a twenty second drain after the last draw,
+limited concurrent decoders, and an early return when a row is off screen.
+
+**The cache ceilings are the budget, and they were once larger than the app's
+own target.** A reading showed 184 MB of textures, 104 of them animation and
+71 pictures, in an app aiming to idle near 150 MB. Animation now holds 180
+frames rather than 450 and caps both sides of a frame, not only its width, so
+a tall sticker no longer costs several times a wide one. Pictures hold about
+32 MB. Raise either only against a measurement, never to make something look
+sharper.
 
 Fixed already, do not undo:
 
@@ -78,7 +84,11 @@ Fixed already, do not undo:
   process's life. The bundled fallback is borrowed from the binary, not copied.
 - Staged picture files decode once at tile size.
 
-The largest open item is image caching. Every drawn image is held three times,
+Run with `--verbose` and the app writes a `memory:` line every half minute,
+naming megabytes per cache. Use it before changing anything here; two rounds
+of this were lost to reasoning from code instead.
+
+The largest open item was image caching. Every drawn image is held three times,
 as file bytes, as decoded pixels and as a texture. `reduce_texture_memory`
 defaults to off and nothing calls the forget-image functions, and the texture
 cache only evicts when one address has two size buckets, which never happens

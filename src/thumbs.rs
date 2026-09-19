@@ -13,9 +13,12 @@ use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-/// Pixels the cache may hold before it evicts. Roughly 100 MB of RGBA, which
-/// is a few dozen pictures at the size they are drawn.
-const MAX_RESIDENT_PIXELS: usize = 25_000_000;
+/// Pixels the cache may hold before it evicts, about 32 MB of RGBA.
+///
+/// The whole app aims to idle near 150 MB, so a single cache cannot be allowed
+/// a third of that. This still holds dozens of pictures at the size a message
+/// draws them, and a chat's worth of avatars many times over.
+const MAX_RESIDENT_PIXELS: usize = 8_000_000;
 
 /// Decoders allowed at once.
 ///
