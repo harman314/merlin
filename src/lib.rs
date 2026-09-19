@@ -9,6 +9,7 @@ pub mod bidi;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod emoji;
+pub mod footprint;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod markup;

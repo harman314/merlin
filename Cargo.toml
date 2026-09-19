@@ -109,7 +109,9 @@ ksni = { version = "0.3", features = ["blocking"] }
 # Windows and macOS tray item.
 tray-icon = { version = "0.24", default-features = false }
 
+# Reads what the operating system charges this process, for the memory report.
 [target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
 # Document previews come from QuickLook, a system framework, so the first page
 # of a PDF renders without bundling a PDF engine. These objc2 crates are
 # already in the tree through other dependencies.

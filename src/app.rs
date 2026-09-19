@@ -1643,9 +1643,12 @@ impl App {
         // Fonts are mapped rather than read, so these bytes sit in the page
         // cache and the kernel can reclaim them. Reported to tell the two apart.
         let fonts = crate::emoji::mapped_bytes() + crate::system_fonts::mapped_bytes();
+        // What the system charges, against what this app can account for. The
+        // difference is everything nothing here tracks.
+        let charged = crate::footprint::bytes().unwrap_or(0) as usize / 1_048_576;
         log::debug!(
-            "memory: textures {} MB in {} ({}); fonts mapped {} MB; \
-             {chats} chats loaded holding {messages} messages",
+            "memory: {charged} MB charged; textures {} MB in {} ({}); \
+             fonts mapped {} MB; {chats} chats loaded holding {messages} messages",
             total / 1_048_576,
             manager.num_allocated(),
             detail.join(", "),
