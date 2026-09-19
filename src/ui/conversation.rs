@@ -3841,6 +3841,38 @@ mod reaction_tests {
     }
 }
 
+/// Thumbnail for a staged picture file, decoded once and scaled to the tile.
+///
+/// The image loader ignores the requested size, so pointing it at a photo would
+/// decode and upload it at full resolution to fill 72 pixels. A phone photo costs
+/// about 50 MB that way, and staging several would cost that each. Scaling here
+/// keeps a tile the size of a tile.
+fn pending_thumbnail(ui: &egui::Ui, path: &Path, tile: f32) -> Option<egui::TextureHandle> {
+    if !crate::app::Pending::is_picture_file(path) {
+        return None;
+    }
+    let id = egui::Id::new(("pending-thumbnail", path));
+    if let Some(cached) = ui
+        .ctx()
+        .data(|data| data.get_temp::<Option<egui::TextureHandle>>(id))
+    {
+        return cached;
+    }
+    let side = (tile * 2.0) as u32;
+    let handle = image::open(path).ok().map(|image| {
+        let small = image.thumbnail(side, side).to_rgba8();
+        let size = [small.width() as usize, small.height() as usize];
+        ui.ctx().load_texture(
+            format!("pending-file-{}", path.display()),
+            egui::ColorImage::from_rgba_unmultiplied(size, &small),
+            egui::TextureOptions::LINEAR,
+        )
+    });
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(id, handle.clone()));
+    handle
+}
+
 /// Pending attachment tiles above the composer.
 fn pending_strip(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
@@ -3906,8 +3938,8 @@ fn pending_strip(app: &mut App, ui: &mut egui::Ui) {
                             .paint_at(ui, inner);
                     }
                     crate::app::Pending::File(path) => {
-                        if crate::app::Pending::is_picture_file(path) {
-                            egui::Image::new(file_uri(path))
+                        if let Some(handle) = pending_thumbnail(ui, path, tile) {
+                            egui::Image::from_texture((handle.id(), handle.size_vec2()))
                                 .fit_to_exact_size(Vec2::splat(tile - 8.0))
                                 .corner_radius(6.0)
                                 .paint_at(ui, rect.shrink(4.0));
