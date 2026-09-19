@@ -1653,6 +1653,27 @@ impl App {
         );
     }
 
+    /// Hands a chat's downloaded attachments to the system preview panel.
+    fn preview_natively(&self, chat: &str, message: &str) -> bool {
+        let ids = self.viewable(chat);
+        let paths: Vec<std::path::PathBuf> = ids
+            .iter()
+            .filter_map(|id| {
+                self.conversations
+                    .get(chat)?
+                    .message(id)?
+                    .content
+                    .media()?
+                    .path
+                    .clone()
+            })
+            .collect();
+        let at = ids.iter().position(|id| id == message).unwrap_or(0);
+        let borrowed: Vec<&std::path::Path> =
+            paths.iter().map(std::path::PathBuf::as_path).collect();
+        crate::preview::show(&borrowed, at)
+    }
+
     /// Message ids in a chat whose attachment the viewer can show, oldest first.
     pub fn viewable(&self, chat: &str) -> Vec<String> {
         self.conversations
@@ -2053,13 +2074,21 @@ impl App {
             }
             Action::QuickLook(path) => {
                 // Falls back to the desktop handler where there is no panel.
-                if !crate::preview::show(&[&path])
+                if !crate::preview::show(&[&path], 0)
                     && let Err(error) = open::that_detached(&path)
                 {
                     self.toast_error(format!("Could not open {}: {error}", path.display()));
                 }
             }
-            Action::Preview { chat, message } => self.viewer = Some((chat, message)),
+            Action::Preview { chat, message } => {
+                // Where the system has a preview panel it takes the whole set,
+                // so its arrow keys step through the chat the way the in-app
+                // viewer does elsewhere.
+                if crate::preview::available() && self.preview_natively(&chat, &message) {
+                    return;
+                }
+                self.viewer = Some((chat, message));
+            }
             Action::CloseViewer => self.viewer = None,
             Action::StepViewer(step) => self.step_viewer(step),
             Action::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),

@@ -12,9 +12,12 @@ pub fn available() -> bool {
     cfg!(target_os = "macos")
 }
 
-/// Opens the system preview on these files. Returns whether it opened.
-pub fn show(paths: &[&Path]) -> bool {
-    imp::show(paths)
+/// Opens the system preview on these files, starting at `at`.
+///
+/// The panel arrows through the whole set, so a chat's attachments are handed
+/// over together rather than one at a time.
+pub fn show(paths: &[&Path], at: usize) -> bool {
+    imp::show(paths, at)
 }
 
 #[cfg(target_os = "macos")]
@@ -79,7 +82,7 @@ mod imp {
     }
 
     /// Opens the system preview panel on these files.
-    pub(super) fn show(paths: &[&Path]) -> bool {
+    pub(super) fn show(paths: &[&Path], at: usize) -> bool {
         let Some(mtm) = MainThreadMarker::new() else {
             return false;
         };
@@ -88,7 +91,8 @@ mod imp {
             .filter_map(|path| path.to_str())
             .map(|path| NSURL::fileURLWithPath(&NSString::from_str(path)))
             .collect();
-        if urls.is_empty() {
+        let count = urls.len();
+        if count == 0 {
             return false;
         }
         let source = Source::new(urls);
@@ -98,6 +102,9 @@ mod imp {
         unsafe {
             panel.setDataSource(Some(ProtocolObject::from_ref(&*source)));
             panel.reloadData();
+            // Opens on the attachment that was clicked; its arrow keys walk
+            // the rest of the chat's media from there.
+            panel.setCurrentPreviewItemIndex(at.min(count - 1) as NSInteger);
         }
         SOURCE.with(|held| held.replace(Some(source)));
         let window: &NSWindow = &panel;
@@ -110,7 +117,7 @@ mod imp {
 mod imp {
     use std::path::Path;
 
-    pub(super) fn show(_paths: &[&Path]) -> bool {
+    pub(super) fn show(_paths: &[&Path], _at: usize) -> bool {
         false
     }
 }
