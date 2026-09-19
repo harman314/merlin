@@ -217,6 +217,8 @@ pub struct App {
 
     pub page: Page,
     pub dialog: Option<Dialog>,
+    /// Chat and message of the attachment open in the viewer.
+    pub viewer: Option<(ChatId, String)>,
     /// Chat filter in the forwarding destination dialog.
     pub forward_search: String,
     pub poll_draft: crate::model::PollDraft,
@@ -423,6 +425,7 @@ impl App {
             scroll_last_event: None,
             page: Page::Chats,
             dialog: None,
+            viewer: None,
             forward_search: String::new(),
             poll_draft: Default::default(),
             poll_creating: false,
@@ -1583,6 +1586,36 @@ impl App {
         self.focus_composer = true;
     }
 
+    /// Message ids in a chat whose attachment the viewer can show, oldest first.
+    pub fn viewable(&self, chat: &str) -> Vec<String> {
+        self.conversations
+            .get(chat)
+            .map(|conversation| {
+                conversation
+                    .messages
+                    .iter()
+                    .filter(|message| viewable(&message.content))
+                    .map(|message| message.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Moves the viewer to another attachment in the same chat.
+    fn step_viewer(&mut self, step: i32) {
+        let Some((chat, message)) = self.viewer.clone() else {
+            return;
+        };
+        let ids = self.viewable(&chat);
+        let Some(at) = ids.iter().position(|id| *id == message) else {
+            return;
+        };
+        let next = i32::try_from(at).unwrap_or(i32::MAX).saturating_add(step);
+        if let Some(id) = usize::try_from(next).ok().and_then(|at| ids.get(at)) {
+            self.viewer = Some((chat, id.clone()));
+        }
+    }
+
     /// Sends pending files, attaching the caption to the first.
     fn send_pending(&mut self, chat: ChatId, caption: String) {
         let caption = caption.trim().to_owned();
@@ -1951,6 +1984,9 @@ impl App {
                     self.toast_error(format!("Could not open {}: {error}", path.display()));
                 }
             }
+            Action::Preview { chat, message } => self.viewer = Some((chat, message)),
+            Action::CloseViewer => self.viewer = None,
+            Action::StepViewer(step) => self.step_viewer(step),
             Action::OpenUrl(url) => ctx.open_url(egui::OpenUrl::new_tab(url)),
             Action::CopyText(text) => {
                 ctx.copy_text(text);
@@ -2671,9 +2707,9 @@ impl App {
         self.mark_settings_dirty();
     }
 
-    /// Handles dropped files and pasted images for the open chat.
+    /// Handles dropped files and pasted files or images for the open chat.
     fn take_drops_and_pastes(&mut self, ctx: &egui::Context) {
-        let (dropped, hovering, paste) = ctx.input(|input| {
+        let (dropped, hovering, paste, text_paste) = ctx.input(|input| {
             let dropped: Vec<PathBuf> = input
                 .raw
                 .dropped_files
@@ -2681,25 +2717,46 @@ impl App {
                 .map(|file| file.path().to_path_buf())
                 .collect();
             let hovering = !input.raw.hovered_files.is_empty();
-            (dropped, hovering, wants_paste(input))
+            let text_paste = input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Paste(_)));
+            (dropped, hovering, wants_paste(input), text_paste)
         });
         self.dropping = hovering && self.open_chat.is_some();
         if !dropped.is_empty() {
             self.actions.push(Action::SendFiles(dropped));
         }
-        // Handle image paste only when the composer or no field has focus.
+        // Handle pasted attachments only when the composer or no field has focus.
         let composing = ctx.memory(|memory| {
             memory.has_focus(egui::Id::new("composer-text")) || memory.focused().is_none()
         });
-        if paste && composing && self.open_chat.is_some() {
-            // egui handles text paste; the app handles clipboard images.
-            if let Some(image) = clipboard_image() {
-                self.actions.push(Action::PasteImage {
-                    width: image.0,
-                    height: image.1,
-                    rgba: image.2,
+        if !composing || self.open_chat.is_none() {
+            return;
+        }
+        // A file manager copies file URLs and a text flavour holding their names.
+        // Staging the files and dropping the text keeps the names out of the
+        // composer. This runs before the views, so the field never sees the event.
+        if text_paste {
+            let files = clipboard_files();
+            if !files.is_empty() {
+                ctx.input_mut(|input| {
+                    input
+                        .events
+                        .retain(|event| !matches!(event, egui::Event::Paste(_)));
                 });
+                self.actions.push(Action::SendFiles(files));
+                return;
             }
+        }
+        // A copied screenshot is a bitmap with no file behind it, and egui emits
+        // no paste event for one, so it is read from the key release instead.
+        if paste && let Some(image) = clipboard_image() {
+            self.actions.push(Action::PasteImage {
+                width: image.0,
+                height: image.1,
+                rgba: image.2,
+            });
         }
     }
 
@@ -2878,6 +2935,22 @@ pub fn wants_paste(input: &egui::InputState) -> bool {
             } if modifiers.command
         )
     })
+}
+
+/// Whether the viewer can show this content, which needs the file on disk.
+pub fn viewable(content: &Content) -> bool {
+    match content {
+        Content::Image { media, .. } | Content::Video { media, .. } => media.path.is_some(),
+        _ => false,
+    }
+}
+
+/// File paths on the clipboard, empty when it holds none.
+fn clipboard_files() -> Vec<PathBuf> {
+    let Ok(mut clipboard) = arboard::Clipboard::new() else {
+        return Vec::new();
+    };
+    clipboard.get().file_list().unwrap_or_default()
 }
 
 /// Clipboard image as width, height, and straight-alpha RGBA.

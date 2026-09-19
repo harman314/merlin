@@ -620,6 +620,15 @@ pub enum Action {
     CancelRecording,
     SendRecording,
     OpenFile(PathBuf),
+    /// Opens an attachment in the in-app viewer.
+    Preview {
+        chat: ChatId,
+        message: String,
+    },
+    /// Closes the in-app viewer.
+    CloseViewer,
+    /// Moves to the previous or next viewable attachment in the chat.
+    StepViewer(i32),
     OpenUrl(String),
     CopyText(String),
     /// Starts a reply to a message in the open chat.

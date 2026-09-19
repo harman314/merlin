@@ -2953,7 +2953,7 @@ fn picture(
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
-                actions.push(Action::OpenFile(path.clone()));
+                actions.push(open_media(view, message, path, sticker.is_some()));
             }
             return size.x;
         }
@@ -2975,7 +2975,7 @@ fn picture(
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    actions.push(Action::OpenFile(path.clone()));
+                    actions.push(open_media(view, message, path, sticker.is_some()));
                 }
                 size.x
             }
@@ -3154,7 +3154,7 @@ fn video(
             .clicked()
             && let Some(path) = &media.path
         {
-            actions.push(Action::OpenFile(path.clone()));
+            actions.push(open_media(view, message, path, false));
         }
         return size.x;
     }
@@ -3220,7 +3220,7 @@ fn video(
         .clicked()
     {
         match &media.path {
-            Some(path) => actions.push(Action::OpenFile(path.clone())),
+            Some(path) => actions.push(open_media(view, message, path, false)),
             None if !matches!(media.state, MediaState::Downloading) => {
                 actions.push(Action::Download {
                     chat: view.chat.id.clone(),
@@ -3640,6 +3640,19 @@ fn recording_strip(app: &mut App, ui: &mut egui::Ui) {
             }
         },
     );
+}
+
+/// Opens an attachment in the viewer, or in the desktop's handler for the
+/// kinds the viewer does not show.
+fn open_media(view: &View<'_>, message: &Message, path: &Path, external: bool) -> Action {
+    if external {
+        Action::OpenFile(path.to_path_buf())
+    } else {
+        Action::Preview {
+            chat: view.chat.id.clone(),
+            message: message.id.clone(),
+        }
+    }
 }
 
 fn file_uri(path: &Path) -> String {

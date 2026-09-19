@@ -44,7 +44,9 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     let escape =
         !menu_open && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape));
     if escape {
-        if app.show_update {
+        if app.viewer.is_some() {
+            actions.push(Action::CloseViewer);
+        } else if app.show_update {
             actions.push(Action::CloseUpdate);
         } else if app.dialog.is_some() {
             actions.push(Action::CloseDialog);
@@ -73,6 +75,16 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             }
         } else if app.open_chat.is_some() {
             actions.push(Action::CloseChat);
+        }
+    }
+    // Left and right walk the viewer's attachments while it is open.
+    if app.viewer.is_some() {
+        let step = ctx.input_mut(|input| {
+            i32::from(input.consume_key(Modifiers::NONE, Key::ArrowRight))
+                - i32::from(input.consume_key(Modifiers::NONE, Key::ArrowLeft))
+        });
+        if step != 0 {
+            actions.push(Action::StepViewer(step));
         }
     }
     // Enter sends a recording because the text field is hidden.
@@ -124,7 +136,10 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
         "Escape",
         "Dismiss the current action, return from search, or close the chat",
     ),
-    ("Ctrl+V", "Paste text, or send a picture from the clipboard"),
+    (
+        "Ctrl+V",
+        "Paste text, or attach pictures and files from the clipboard",
+    ),
     ("Ctrl+B", "Show or hide the chat list"),
     ("Ctrl+End", "Jump to the newest message"),
     ("Ctrl+,", "Settings"),

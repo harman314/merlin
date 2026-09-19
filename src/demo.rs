@@ -1145,6 +1145,21 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
             "unread" => app.chat_filter = crate::model::ChatFilter::Unread,
             "private" => app.chat_filter = crate::model::ChatFilter::Private,
             "groups" => app.chat_filter = crate::model::ChatFilter::Groups,
+            "viewer" => {
+                let (photo, _) = sample_files(app);
+                let chat = app.open_chat.clone().expect("demo chat");
+                let mut opened = None;
+                if let Some(conversation) = app.conversations.get_mut(&chat) {
+                    for message in &mut conversation.messages {
+                        if let Content::Image { media, .. } = &mut message.content {
+                            media.path = Some(photo.clone());
+                            opened = Some(message.id.clone());
+                            break;
+                        }
+                    }
+                }
+                app.viewer = opened.map(|id| (chat, id));
+            }
             "picker" => app.picker = Some(crate::model::PickerTab::Emoji),
             "stickers" => {
                 app.picker = Some(crate::model::PickerTab::Stickers);
@@ -1387,6 +1402,7 @@ mod tests {
             "offline",
             "syncing",
             "picker",
+            "viewer",
             "stickers",
             "typing",
             "mention",
