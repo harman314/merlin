@@ -14,8 +14,24 @@ use std::sync::{Arc, Mutex};
 /// Width, height, and straight-alpha RGBA.
 type Pixels = (usize, usize, Vec<u8>);
 
+/// Forces previews on for tests and the demo, which run where the system
+/// thumbnailer does not exist.
+#[cfg(any(test, feature = "demo"))]
+static FORCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Pretends the platform can preview documents, so the routing can be tested
+/// away from macOS. The preview itself still reports nothing to show.
+#[cfg(any(test, feature = "demo"))]
+pub fn force_available(on: bool) {
+    FORCED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Whether this platform can preview documents in the app.
 pub fn available() -> bool {
+    #[cfg(any(test, feature = "demo"))]
+    if FORCED.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
     cfg!(target_os = "macos")
 }
 

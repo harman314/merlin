@@ -219,6 +219,12 @@ pub struct App {
     pub dialog: Option<Dialog>,
     /// Chat and message of the attachment open in the viewer.
     pub viewer: Option<(ChatId, String)>,
+    /// Whether the paste being handled already staged files.
+    ///
+    /// A file manager puts the file's icon on the clipboard as a picture
+    /// beside the file itself. The paste event stages the file, and the key
+    /// release that follows a frame later would otherwise stage the icon too.
+    paste_staged_files: bool,
     /// Chat filter in the forwarding destination dialog.
     pub forward_search: String,
     pub poll_draft: crate::model::PollDraft,
@@ -426,6 +432,7 @@ impl App {
             page: Page::Chats,
             dialog: None,
             viewer: None,
+            paste_staged_files: false,
             forward_search: String::new(),
             poll_draft: Default::default(),
             poll_creating: false,
@@ -2747,12 +2754,20 @@ impl App {
                         .events
                         .retain(|event| !matches!(event, egui::Event::Paste(_)));
                 });
+                self.paste_staged_files = true;
                 self.actions.push(Action::SendFiles(files));
                 return;
             }
+            self.paste_staged_files = false;
         }
         // A copied screenshot is a bitmap with no file behind it, and egui emits
         // no paste event for one, so it is read from the key release instead.
+        // The release closes a gesture that already staged files, and a file
+        // manager leaves the file's icon on the clipboard as a picture, so that
+        // gesture must not reach the bitmap below.
+        if paste && std::mem::take(&mut self.paste_staged_files) {
+            return;
+        }
         if paste && let Some(image) = clipboard_image() {
             self.actions.push(Action::PasteImage {
                 width: image.0,

@@ -1160,6 +1160,22 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 }
                 app.viewer = opened.map(|id| (chat, id));
             }
+            "document" => {
+                crate::quicklook::force_available(true);
+                let (photo, _) = sample_files(app);
+                let chat = app.open_chat.clone().expect("demo chat");
+                let mut opened = None;
+                if let Some(conversation) = app.conversations.get_mut(&chat) {
+                    for message in &mut conversation.messages {
+                        if let Content::Document { media, .. } = &mut message.content {
+                            media.path = Some(photo.clone());
+                            opened = Some(message.id.clone());
+                            break;
+                        }
+                    }
+                }
+                app.viewer = opened.map(|id| (chat, id));
+            }
             "picker" => app.picker = Some(crate::model::PickerTab::Emoji),
             "stickers" => {
                 app.picker = Some(crate::model::PickerTab::Stickers);
@@ -1356,6 +1372,49 @@ mod tests {
     }
 
     #[test]
+    fn clicking_a_document_opens_the_viewer_where_the_system_can_preview_it() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        render(&mut app, &ctx);
+        let chat = app.open_chat.clone().expect("demo chat");
+        let (photo, _) = sample_files(&app);
+        let id = {
+            let conversation = app.conversations.get_mut(&chat).expect("conversation");
+            let message = conversation
+                .messages
+                .iter_mut()
+                .find(|message| matches!(message.content, Content::Document { .. }))
+                .expect("a document in the sample");
+            if let Content::Document { media, .. } = &mut message.content {
+                media.path = Some(photo);
+            }
+            message.id.clone()
+        };
+
+        // Without a system thumbnailer the document stays with the desktop.
+        crate::quicklook::force_available(false);
+        assert!(!app.viewable(&chat).contains(&id));
+
+        crate::quicklook::force_available(true);
+        assert!(
+            app.viewable(&chat).contains(&id),
+            "a downloaded document should be viewable where previews exist"
+        );
+        app.actions.push(crate::model::Action::Preview {
+            chat: chat.clone(),
+            message: id.clone(),
+        });
+        render(&mut app, &ctx);
+        assert_eq!(
+            app.viewer,
+            Some((chat, id)),
+            "the viewer should stay open rather than close itself on the first frame"
+        );
+        crate::quicklook::force_available(false);
+    }
+
+    #[test]
     fn every_surface_lays_out() {
         let mut app = app();
         let ctx = egui::Context::default();
@@ -1403,6 +1462,7 @@ mod tests {
             "syncing",
             "picker",
             "viewer",
+            "document",
             "stickers",
             "typing",
             "mention",

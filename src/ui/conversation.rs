@@ -3863,7 +3863,12 @@ mod reaction_tests {
 /// keeps a tile the size of a tile.
 fn pending_thumbnail(ui: &egui::Ui, path: &Path, tile: f32) -> Option<egui::TextureHandle> {
     if !crate::app::Pending::is_picture_file(path) {
-        return None;
+        // Video and documents have no decoder here, but the system thumbnailer
+        // renders them where there is one.
+        return match crate::quicklook::preview(ui.ctx(), path, tile * 2.0) {
+            crate::quicklook::Preview::Ready(texture) => Some(texture),
+            _ => None,
+        };
     }
     let id = egui::Id::new(("pending-thumbnail", path));
     if let Some(cached) = ui
@@ -3895,7 +3900,12 @@ fn pending_strip(app: &mut App, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
         for (index, item) in app.pending.iter_mut().enumerate() {
-            let (rect, response) = ui.allocate_exact_size(Vec2::splat(tile), Sense::hover());
+            let (rect, mut response) = ui.allocate_exact_size(Vec2::splat(tile), Sense::hover());
+            if let crate::app::Pending::File(path) = item
+                && let Some(name) = path.file_name()
+            {
+                response = response.on_hover_text(name.to_string_lossy());
+            }
             if ui.is_rect_visible(rect) {
                 ui.painter().rect_filled(rect, 8.0, palette.surface);
                 match item {
