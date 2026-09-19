@@ -60,7 +60,13 @@ static FONT: OnceLock<Option<Font>> = OnceLock::new();
 /// Noto Color Emoji supplies bitmap glyphs on systems such as Windows whose
 /// installed emoji font uses an outline colour format this renderer cannot
 /// rasterize.
-const BUNDLED: &[u8] = include_bytes!("../assets/fonts/NotoColorEmoji.ttf");
+///
+/// macOS has shipped Apple Color Emoji since 10.7, so the 10.7 MB bundle is
+/// left out of that build rather than carried and never read.
+#[cfg(not(target_os = "macos"))]
+const BUNDLED: Option<&[u8]> = Some(include_bytes!("../assets/fonts/NotoColorEmoji.ttf"));
+#[cfg(target_os = "macos")]
+const BUNDLED: Option<&[u8]> = None;
 
 /// Bytes the emoji font occupies, for the memory report. Mapped, not heap.
 pub fn mapped_bytes() -> usize {
@@ -92,7 +98,7 @@ fn load() -> Option<Font> {
     {
         return Some(font);
     }
-    load_bytes(Bytes::Static(BUNDLED), 0, "bundled Noto Color Emoji")
+    BUNDLED.and_then(|bytes| load_bytes(Bytes::Static(bytes), 0, "bundled Noto Color Emoji"))
 }
 
 fn load_bytes(bytes: Bytes, index: u32, source: &str) -> Option<Font> {
@@ -538,7 +544,11 @@ mod tests {
 
     #[test]
     fn the_bundled_font_renders_colour_emoji() {
-        let font = load_bytes(Bytes::Static(BUNDLED), 0, "test font").expect("bundled font");
+        let Some(bytes) = BUNDLED else {
+            // macOS builds leave the bundle out; the system font covers them.
+            return;
+        };
+        let font = load_bytes(Bytes::Static(bytes), 0, "test font").expect("bundled font");
         let font_ref = font.font_ref().expect("font face");
         let glyph = font
             .glyph(&font_ref, &['\u{1F600}'])
