@@ -133,14 +133,16 @@ pub fn paint_avatar(
     let size = rect.width();
     let mut painted = false;
     if let Some(picture) = picture {
-        let uri = crate::util::image_uri(picture);
-        let image = egui::Image::new(uri)
-            .fit_to_exact_size(Vec2::splat(size))
-            .corner_radius(size / 2.0);
-        if let Ok(egui::load::TexturePoll::Ready { .. }) =
-            image.load_for_size(ui.ctx(), Vec2::splat(size))
+        // Decoded at the size drawn. Letting egui load these decodes every
+        // profile picture at its full resolution and keeps three copies of
+        // each, which for a chat list is most of the app's memory.
+        if let crate::thumbs::Thumb::Ready(texture) =
+            crate::thumbs::scaled(ui.ctx(), picture, Vec2::splat(size * 2.0))
         {
-            image.paint_at(ui, rect);
+            egui::Image::from_texture((texture.id(), texture.size_vec2()))
+                .fit_to_exact_size(Vec2::splat(size))
+                .corner_radius(size / 2.0)
+                .paint_at(ui, rect);
             painted = true;
         }
     }
