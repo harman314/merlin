@@ -123,7 +123,7 @@ apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
 objc2 = "0.6"
 raw-window-handle = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSButton", "NSControl", "NSEvent", "NSMenu", "NSMenuItem", "NSResponder", "NSRunningApplication", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSError", "NSGeometry", "NSObjCRuntime", "NSRunLoop", "NSString", "NSURL"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSDate", "NSError", "NSGeometry", "NSObjCRuntime", "NSProcessInfo", "NSRunLoop", "NSString", "NSURL"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-native-keyring-store = { version = "1.1", default-features = false }

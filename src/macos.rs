@@ -25,21 +25,39 @@ fn item(id: &str, text: &str, shortcut: Option<&str>) -> MenuItem {
     )
 }
 
+/// Names the process for the menu bar.
+///
+/// The first menu always shows the application's name, and macOS takes that
+/// from the bundle. A build run straight from cargo has no bundle, so it falls
+/// back to the executable's filename and the menu reads "merlin". Installed
+/// copies already read their name from the bundle, where this is a no-op.
+fn name_the_process() {
+    use objc2_foundation::{NSProcessInfo, NSString};
+
+    let info = NSProcessInfo::processInfo();
+    if info.processName().to_string() != DISPLAY_NAME {
+        info.setProcessName(&NSString::from_str(DISPLAY_NAME));
+    }
+}
+
+/// The name shown to people, as opposed to the lowercase executable.
+const DISPLAY_NAME: &str = "Merlin";
+
 fn build_menu() -> tray_icon::menu::Result<Menu> {
     let menu = Menu::new();
-    let app = Submenu::new("Merlin", true);
+    let app = Submenu::new(DISPLAY_NAME, true);
     app.append_items(&[
-        &item("about", "About Merlin", None),
+        &item("about", &format!("About {DISPLAY_NAME}"), None),
         &Native::separator(),
         &item("settings", "Settings…", Some("Super+Comma")),
         &Native::separator(),
         &Native::services(None),
         &Native::separator(),
-        &Native::hide(Some("Hide Merlin")),
+        &Native::hide(Some(format!("Hide {DISPLAY_NAME}").as_str())),
         &Native::hide_others(None),
         &Native::show_all(None),
         &Native::separator(),
-        &item("quit", "Quit Merlin", Some("Super+KeyQ")),
+        &item("quit", &format!("Quit {DISPLAY_NAME}"), Some("Super+KeyQ")),
     ])?;
     let file = Submenu::new("File", true);
     file.append_items(&[
@@ -76,12 +94,12 @@ fn build_menu() -> tray_icon::menu::Result<Menu> {
         &Native::minimize(None),
         &Native::maximize(Some("Zoom")),
         &Native::separator(),
-        &item("show-window", "Show Merlin", None),
+        &item("show-window", &format!("Show {DISPLAY_NAME}"), None),
     ])?;
     let help = Submenu::new("Help", true);
     help.append_items(&[
         &item("shortcuts", "Keyboard Shortcuts", Some("Super+Slash")),
-        &item("help", "Merlin Help", None),
+        &item("help", &format!("{DISPLAY_NAME} Help"), None),
     ])?;
     menu.append_items(&[&app, &file, &edit, &view, &window, &help])?;
     window.set_as_windows_menu_for_nsapp();
@@ -94,6 +112,7 @@ pub fn attach(ctx: &egui::Context) {
     if objc2::MainThreadMarker::new().is_none() {
         return;
     }
+    name_the_process();
     *REPAINT.lock().unwrap_or_else(|p| p.into_inner()) = Some(ctx.clone());
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         if native_edit(&event.id.0) {
