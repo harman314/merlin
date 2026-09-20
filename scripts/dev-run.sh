@@ -8,8 +8,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 NAME="${MERLIN_DEV_IDENTITY:-Merlin Dev}"
-PROFILE="${1:-debug}"
-shift || true
+
+# Only a literal profile is consumed. Everything else, --verbose included,
+# belongs to the app.
+PROFILE=debug
+case "${1:-}" in
+    debug | release)
+        PROFILE="$1"
+        shift
+        ;;
+esac
 
 if [ "$PROFILE" = "release" ]; then
     cargo build --release
