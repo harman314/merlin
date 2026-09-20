@@ -27,6 +27,14 @@ entry, and links to the phone as its own device.
   and notifications, and the Windows application id. Never reuse
   `me.paolino.*`; that is the upstream author's namespace.
 
+**A build from the source tree is a third app, not a second copy.** An
+installed Merlin and `scripts/dev-run.sh` were the same program, so launching
+one while the other ran only raised the first window. `src/profile.rs` reads
+`MERLIN_PROFILE=dev` and switches the directory name, the instance port, the
+wire prefix and the display name together, and `dev-run.sh` sets it. Anything
+new that would collide between two running copies belongs in that one file,
+beside the four that are already there.
+
 ## Interface
 
 **There is no design system, and that is the root cause of most "this looks
@@ -134,6 +142,13 @@ split produced a poster cached as an animation.
 module changed its indentation and a replacement quietly did nothing, leaving
 a feature missing while every test stayed green. Assert the match, and check
 the result compiles where it actually runs.
+
+**Read an input source once per gesture, in one place.** One Ctrl+V reaches
+the app twice, as a paste event on the press and a key release after it. The
+clipboard was read at both, files at the first and pictures at the second, so
+a clipboard holding a picture and its address staged the picture twice. Two
+rounds of patching the second read failed because the shape was wrong. One
+read, one decision, one record of having decided.
 
 ## Verifying macOS code
 
