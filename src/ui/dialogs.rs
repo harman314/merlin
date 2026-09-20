@@ -56,6 +56,36 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
 fn forward(app: &mut App, ui: &mut egui::Ui, from_chat: &str, message: &str) {
     let palette = app.palette;
     title(ui, app, "Forward message");
+
+    // What is being forwarded, so the destination is chosen against something
+    // rather than from memory.
+    if let Some(summary) = app
+        .conversations
+        .get(from_chat)
+        .and_then(|conversation| conversation.message(message))
+        .map(crate::model::Message::summary)
+    {
+        let width = ui.available_width();
+        Frame::new()
+            .fill(palette.surface)
+            .corner_radius(8.0)
+            .inner_margin(Margin::symmetric(10, 8))
+            .show(ui, |ui| {
+                ui.set_width(width - 20.0);
+                let line = super::widgets::line(
+                    ui,
+                    &summary,
+                    theme::regular(13.0),
+                    palette.secondary,
+                    width - 20.0,
+                    2,
+                );
+                let (rect, _) = ui.allocate_exact_size(line.size(), Sense::hover());
+                line.paint(ui, rect.min, palette.secondary);
+            });
+        ui.add_space(8.0);
+    }
+
     let width = ui.available_width();
     let search = super::widgets::search_field(
         ui,
@@ -85,8 +115,8 @@ fn forward(app: &mut App, ui: &mut egui::Ui, from_chat: &str, message: &str) {
     chats.sort_by_key(|chat| std::cmp::Reverse(chat.last_activity));
 
     let row_height = 52.0;
-    let max_height = (ui.ctx().content_rect().height() - 220.0).clamp(row_height * 3.0, 420.0);
-    let mut destination = None;
+    let max_height = (ui.ctx().content_rect().height() - 300.0).clamp(row_height * 3.0, 360.0);
+    let mut toggled = None;
     egui::ScrollArea::vertical()
         .id_salt("forward-chats")
         .max_height(max_height)
@@ -95,10 +125,16 @@ fn forward(app: &mut App, ui: &mut egui::Ui, from_chat: &str, message: &str) {
             ui.spacing_mut().item_spacing.y = 0.0;
             for chat in &chats[range] {
                 let title = app.chat_title(chat);
+                let picked = app.forward_targets.contains(&chat.id);
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(ui.available_width(), row_height), Sense::click());
                 if ui.is_rect_visible(rect) {
-                    if response.hovered() {
+                    // A chosen row reads as the accent, a hovered one only
+                    // as warmth, so the two never look the same.
+                    if picked {
+                        ui.painter()
+                            .rect_filled(rect, 8.0, palette.accent.gamma_multiply(0.18));
+                    } else if response.hovered() {
                         ui.painter().rect_filled(rect, 8.0, palette.surface_hover);
                     }
                     let avatar = egui::Rect::from_center_size(
@@ -114,12 +150,27 @@ fn forward(app: &mut App, ui: &mut egui::Ui, from_chat: &str, message: &str) {
                         &chat.id,
                         picture.as_deref(),
                     );
+                    let tick = egui::Rect::from_center_size(
+                        pos2(rect.right() - 20.0, rect.center().y),
+                        egui::Vec2::splat(20.0),
+                    );
+                    if picked {
+                        ui.painter()
+                            .circle_filled(tick.center(), 10.0, palette.accent);
+                        theme::paint_icon(ui, Icon::Check, tick, 13.0, palette.on_accent);
+                    } else {
+                        ui.painter().circle_stroke(
+                            tick.center(),
+                            9.0,
+                            Stroke::new(1.5, palette.outline),
+                        );
+                    }
                     let line = super::widgets::line(
                         ui,
                         &title,
                         theme::medium(14.5),
                         palette.text,
-                        rect.width() - 62.0,
+                        rect.width() - 96.0,
                         1,
                     );
                     line.paint(
@@ -137,10 +188,18 @@ fn forward(app: &mut App, ui: &mut egui::Ui, from_chat: &str, message: &str) {
                     .on_hover_cursor(egui::CursorIcon::PointingHand)
                     .clicked()
                 {
-                    destination = Some(chat.id.clone());
+                    toggled = Some(chat.id.clone());
                 }
             }
         });
+    if let Some(id) = toggled {
+        match app.forward_targets.iter().position(|known| *known == id) {
+            Some(at) => {
+                app.forward_targets.remove(at);
+            }
+            None => app.forward_targets.push(id),
+        }
+    }
     if chats.is_empty() {
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -154,11 +213,33 @@ fn forward(app: &mut App, ui: &mut egui::Ui, from_chat: &str, message: &str) {
         });
         ui.add_space(12.0);
     }
-    if let Some(to_chat) = destination {
+
+    ui.add_space(10.0);
+    let chosen = app.forward_targets.len();
+    let mut send = false;
+    ui.horizontal(|ui| {
+        theme::text(
+            ui,
+            &match chosen {
+                0 => "Choose who to forward to".to_owned(),
+                1 => "1 chat selected".to_owned(),
+                many => format!("{many} chats selected"),
+            },
+            theme::regular(13.0),
+            palette.secondary,
+        );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Styled as ready only when it is; the click is gated the same way.
+            if theme::pill_button(ui, &palette, "Send", chosen > 0).clicked() && chosen > 0 {
+                send = true;
+            }
+        });
+    });
+    if send {
         app.actions.push(Action::Forward {
             from_chat: from_chat.to_owned(),
             message: message.to_owned(),
-            to_chat,
+            to_chats: app.forward_targets.clone(),
         });
     }
 }

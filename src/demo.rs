@@ -1410,6 +1410,53 @@ mod tests {
     }
 
     #[test]
+    fn forwarding_takes_several_chats_and_confirms_once() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        render(&mut app, &ctx);
+        let from = app.open_chat.clone().expect("demo chat");
+        let message = app
+            .conversations
+            .get(&from)
+            .and_then(|conversation| conversation.messages.last())
+            .map(|message| message.id.clone())
+            .expect("a message to forward");
+        let targets: Vec<_> = app
+            .chats
+            .iter()
+            .take(2)
+            .map(|chat| chat.id.clone())
+            .collect();
+        assert_eq!(targets.len(), 2, "the sample needs two chats");
+
+        app.actions.push(crate::model::Action::Forward {
+            from_chat: from,
+            message,
+            to_chats: targets,
+        });
+        render(&mut app, &ctx);
+
+        // One action for the whole selection, so it confirms once rather than
+        // silently, which is what the old one-click-per-chat flow did.
+        assert!(app.dialog.is_none(), "forwarding closes the dialog");
+        assert!(
+            app.forward_targets.is_empty(),
+            "the selection does not survive the send"
+        );
+        assert!(
+            app.toasts
+                .iter()
+                .any(|toast| toast.message.contains("Forwarded to 2 chats")),
+            "the send is confirmed, got {:?}",
+            app.toasts
+                .iter()
+                .map(|toast| &toast.message)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn every_surface_lays_out() {
         let mut app = app();
         let ctx = egui::Context::default();

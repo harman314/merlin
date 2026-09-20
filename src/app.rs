@@ -229,6 +229,8 @@ pub struct App {
     paste_staged_files: bool,
     /// Chat filter in the forwarding destination dialog.
     pub forward_search: String,
+    /// Chats ticked in the forward dialog, in the order they were ticked.
+    pub forward_targets: Vec<ChatId>,
     pub poll_draft: crate::model::PollDraft,
     pub poll_creating: bool,
     pub poll_voting: HashSet<(ChatId, String)>,
@@ -437,6 +439,7 @@ impl App {
             memory_logged: Instant::now(),
             paste_staged_files: false,
             forward_search: String::new(),
+            forward_targets: Vec::new(),
             poll_draft: Default::default(),
             poll_creating: false,
             poll_voting: HashSet::new(),
@@ -2107,15 +2110,30 @@ impl App {
             Action::Forward {
                 from_chat,
                 message,
-                to_chat,
+                to_chats,
             } => {
-                self.backend.send(Command::Forward {
-                    from_chat,
-                    message,
-                    to_chat,
-                });
+                let count = to_chats.len();
+                let single = to_chats
+                    .first()
+                    .filter(|_| count == 1)
+                    .and_then(|chat| self.chat(chat))
+                    .map(|chat| self.chat_title(chat));
+                for to_chat in to_chats {
+                    self.backend.send(Command::Forward {
+                        from_chat: from_chat.clone(),
+                        message: message.clone(),
+                        to_chat,
+                    });
+                }
+                if count > 0 {
+                    self.toast(match single {
+                        Some(name) => format!("Forwarded to {name}"),
+                        None => format!("Forwarded to {count} chats"),
+                    });
+                }
                 self.dialog = None;
                 self.forward_search.clear();
+                self.forward_targets.clear();
             }
             Action::Edit(id) => {
                 let text = self
@@ -2425,6 +2443,7 @@ impl App {
                 }
                 if matches!(&dialog, Dialog::Forward { .. }) {
                     self.forward_search.clear();
+                    self.forward_targets.clear();
                 }
                 if dialog == Dialog::PairWithPhone {
                     self.pair_phone.clear();
@@ -2441,6 +2460,7 @@ impl App {
             Action::CloseDialog => {
                 self.dialog = None;
                 self.forward_search.clear();
+                self.forward_targets.clear();
                 self.contact_edit = None;
                 self.refocus_composer(ctx);
             }

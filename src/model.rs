@@ -636,11 +636,11 @@ pub enum Action {
     /// Starts a reply to a message in the open chat.
     Reply(String),
     CancelReply,
-    /// Forwards an archived message to another chat.
+    /// Forwards an archived message to one or more chats.
     Forward {
         from_chat: ChatId,
         message: String,
-        to_chat: ChatId,
+        to_chats: Vec<ChatId>,
     },
     /// Loads an outgoing message into the composer for editing.
     Edit(String),
