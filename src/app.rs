@@ -28,6 +28,12 @@ pub const EDIT_WINDOW: Duration = Duration::from_secs(15 * 60);
 /// WhatsApp revoke-for-everyone window.
 pub const REVOKE_WINDOW: Duration = Duration::from_secs(2 * 24 * 60 * 60);
 
+/// How long one Ctrl+V keeps counting as the same paste, in seconds.
+///
+/// The press and the release reach the app in different frames, and only one
+/// of them may stage the attachment.
+const PASTE_GESTURE: f64 = 0.5;
+
 /// Pause after which a trackpad gesture selects a new axis.
 const SCROLL_GESTURE_GAP: Duration = Duration::from_millis(150);
 /// Linux trackpad scroll multiplier.
@@ -221,12 +227,13 @@ pub struct App {
     pub viewer: Option<(ChatId, String)>,
     /// When the memory report was last written.
     memory_logged: Instant,
-    /// Whether the paste being handled already staged files.
+    /// When the last paste gesture staged an attachment.
     ///
-    /// A file manager puts the file's icon on the clipboard as a picture
-    /// beside the file itself. The paste event stages the file, and the key
-    /// release that follows a frame later would otherwise stage the icon too.
-    paste_staged_files: bool,
+    /// One Ctrl+V reaches the app twice. egui emits a paste event on the press
+    /// when the clipboard holds text, and the key release arrives a frame or
+    /// more later. Either can be the first to find an attachment, so the one
+    /// that stages it records the time and the other stands down.
+    paste_staged_at: Option<f64>,
     /// Chat filter in the forwarding destination dialog.
     pub forward_search: String,
     /// Chats ticked in the forward dialog, in the order they were ticked.
@@ -437,7 +444,7 @@ impl App {
             dialog: None,
             viewer: None,
             memory_logged: Instant::now(),
-            paste_staged_files: false,
+            paste_staged_at: None,
             forward_search: String::new(),
             forward_targets: Vec::new(),
             poll_draft: Default::default(),
@@ -2837,7 +2844,7 @@ impl App {
 
     /// Handles dropped files and pasted files or images for the open chat.
     fn take_drops_and_pastes(&mut self, ctx: &egui::Context) {
-        let (dropped, hovering, paste, text_paste) = ctx.input(|input| {
+        let (dropped, hovering, released, pasted_text, now) = ctx.input(|input| {
             let dropped: Vec<PathBuf> = input
                 .raw
                 .dropped_files
@@ -2845,57 +2852,81 @@ impl App {
                 .map(|file| file.path().to_path_buf())
                 .collect();
             let hovering = !input.raw.hovered_files.is_empty();
-            let text_paste = input
+            let pasted_text = input
                 .events
                 .iter()
                 .any(|event| matches!(event, egui::Event::Paste(_)));
-            (dropped, hovering, wants_paste(input), text_paste)
+            (
+                dropped,
+                hovering,
+                wants_paste(input),
+                pasted_text,
+                input.time,
+            )
         });
         self.dropping = hovering && self.open_chat.is_some();
         if !dropped.is_empty() {
             self.actions.push(Action::SendFiles(dropped));
         }
+        if !pasted_text && !released {
+            return;
+        }
         // Handle pasted attachments only when the composer or no field has focus.
         let composing = ctx.memory(|memory| {
             memory.has_focus(egui::Id::new("composer-text")) || memory.focused().is_none()
         });
-        if !composing || self.open_chat.is_none() {
-            return;
+        let mine = composing && self.open_chat.is_some();
+        let spent = self
+            .paste_staged_at
+            .is_some_and(|at| now - at < PASTE_GESTURE);
+        let staged = mine && !spent && self.stage_clipboard();
+        if staged {
+            self.paste_staged_at = Some(now);
         }
-        // A file manager copies file URLs and a text flavour holding their names.
-        // Staging the files and dropping the text keeps the names out of the
-        // composer. This runs before the views, so the field never sees the event.
-        if text_paste {
-            let files = clipboard_files();
-            // Counts only. Paths can carry personal data and never reach the log.
-            log::debug!("paste: {} file(s) on the clipboard", files.len());
-            if !files.is_empty() {
-                ctx.input_mut(|input| {
-                    input
-                        .events
-                        .retain(|event| !matches!(event, egui::Event::Paste(_)));
-                });
-                self.paste_staged_files = true;
-                self.actions.push(Action::SendFiles(files));
-                return;
-            }
-            self.paste_staged_files = false;
-        }
-        // A copied screenshot is a bitmap with no file behind it, and egui emits
-        // no paste event for one, so it is read from the key release instead.
-        // The release closes a gesture that already staged files, and a file
-        // manager leaves the file's icon on the clipboard as a picture, so that
-        // gesture must not reach the bitmap below.
-        if paste && std::mem::take(&mut self.paste_staged_files) {
-            return;
-        }
-        if paste && let Some(image) = clipboard_image() {
-            self.actions.push(Action::PasteImage {
-                width: image.0,
-                height: image.1,
-                rgba: image.2,
+        // A file manager copies file URLs and a text flavour holding their
+        // names, and an image copied from a browser arrives with its address.
+        // Dropping the text keeps either out of the composer. This runs before
+        // the views, so the field never sees the event.
+        if pasted_text && (staged || spent) {
+            ctx.input_mut(|input| {
+                input
+                    .events
+                    .retain(|event| !matches!(event, egui::Event::Paste(_)));
             });
         }
+        // The release ends the gesture, so the next paste starts clean rather
+        // than waiting out the window. A gesture cut short by a lost window
+        // leaves the record behind, which is what the window is for.
+        if released {
+            self.paste_staged_at = None;
+        }
+    }
+
+    /// Stages whatever the clipboard holds for the open chat, files first.
+    ///
+    /// A file manager leaves the file's icon on the clipboard as a picture
+    /// beside the file itself, so the picture is read only where there are no
+    /// files. Returns whether anything was staged.
+    fn stage_clipboard(&mut self) -> bool {
+        let files = clipboard_files();
+        // Counts only. Paths can carry personal data and never reach the log.
+        log::debug!("paste: {} file(s) on the clipboard", files.len());
+        if !files.is_empty() {
+            self.actions.push(Action::SendFiles(files));
+            return true;
+        }
+        // A copied screenshot is a bitmap with no file behind it, and egui
+        // emits no paste event for one, so this runs on the key release too.
+        let Some((width, height, rgba)) = clipboard_image() else {
+            return false;
+        };
+        log::debug!("paste: a {width}x{height} picture on the clipboard");
+        self.actions.push(Action::PasteImage {
+            width,
+            height,
+            rgba,
+        });
+        true
     }
 
     /// Locks trackpad scrolling to one axis, scales Linux deltas, and adds glide.
@@ -3001,8 +3032,6 @@ impl App {
     }
 }
 
-/// Detects paste from the key release. egui consumes the press and emits a
-/// `Paste` event only for text, so image paste has no key-press event.
 /// Builds WhatsApp's full and short contact names. A first name is required.
 fn compose_name(first: &str, last: &str) -> (Option<String>, Option<String>) {
     let first = first.trim();
@@ -3061,6 +3090,8 @@ fn mention_refs(ids: &[String]) -> Vec<crate::model::MentionRef> {
         .collect()
 }
 
+/// Detects a paste from the key release. egui swallows the press and emits a
+/// `Paste` event only for text, so a picture paste has no key-press event.
 pub fn wants_paste(input: &egui::InputState) -> bool {
     input.events.iter().any(|event| {
         matches!(
@@ -3094,22 +3125,65 @@ pub fn viewable(content: &Content) -> bool {
     }
 }
 
+/// Clipboard contents for tests, which have no system clipboard to read.
+#[cfg(test)]
+mod stub {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    type Picture = Option<(usize, usize, Vec<u8>)>;
+
+    thread_local! {
+        static HELD: RefCell<(Vec<PathBuf>, Picture)> =
+            const { RefCell::new((Vec::new(), None)) };
+    }
+
+    pub fn hold(files: Vec<PathBuf>, picture: Picture) {
+        HELD.with(|held| *held.borrow_mut() = (files, picture));
+    }
+
+    pub fn files() -> Vec<PathBuf> {
+        HELD.with(|held| held.borrow().0.clone())
+    }
+
+    pub fn picture() -> Picture {
+        HELD.with(|held| held.borrow().1.clone())
+    }
+}
+
+#[cfg(test)]
+pub(crate) use stub::hold as hold_clipboard;
+
 /// File paths on the clipboard, empty when it holds none.
 fn clipboard_files() -> Vec<PathBuf> {
-    let Ok(mut clipboard) = arboard::Clipboard::new() else {
-        return Vec::new();
-    };
-    clipboard.get().file_list().unwrap_or_default()
+    #[cfg(test)]
+    {
+        stub::files()
+    }
+    #[cfg(not(test))]
+    {
+        let Ok(mut clipboard) = arboard::Clipboard::new() else {
+            return Vec::new();
+        };
+        clipboard.get().file_list().unwrap_or_default()
+    }
 }
 
 /// Clipboard image as width, height, and straight-alpha RGBA.
 fn clipboard_image() -> Option<(usize, usize, Vec<u8>)> {
-    let mut clipboard = arboard::Clipboard::new().ok()?;
-    let image = clipboard.get_image().ok()?;
-    if image.width == 0 || image.height == 0 {
-        return None;
+    #[cfg(test)]
+    {
+        stub::picture()
     }
-    Some((image.width, image.height, image.bytes.into_owned()))
+    #[cfg(not(test))]
+    {
+        let mut clipboard = arboard::Clipboard::new().ok()?;
+        let image = clipboard.get_image().ok()?;
+        if image.width == 0 || image.height == 0 {
+            return None;
+        }
+        Some((image.width, image.height, image.bytes.into_owned()))
+    }
 }
 
 impl Delivery {

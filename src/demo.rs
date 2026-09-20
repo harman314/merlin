@@ -2126,6 +2126,76 @@ mod tests {
         assert!(!ctx.input(crate::app::wants_paste), "a plain V is typing");
     }
 
+    fn released_v() -> egui::Event {
+        egui::Event::Key {
+            key: egui::Key::V,
+            physical_key: None,
+            pressed: false,
+            repeat: false,
+            modifiers: egui::Modifiers::COMMAND,
+        }
+    }
+
+    /// A picture copied from a browser arrives beside its address. The address
+    /// reached the composer and the key release staged the picture after it,
+    /// so one Ctrl+V put two things in the chat box.
+    #[test]
+    fn a_picture_pasted_beside_text_is_staged_once() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        // The composer holds focus during a real paste, so the text field is
+        // there to catch anything the handler lets through.
+        app.focus_composer = true;
+        render(&mut app, &ctx);
+        assert!(
+            ctx.memory(|memory| memory.has_focus(egui::Id::new("composer-text"))),
+            "the composer has focus"
+        );
+        crate::app::hold_clipboard(Vec::new(), Some((2, 2, vec![200; 16])));
+
+        let address = egui::Event::Paste("https://example.invalid/cat.png".into());
+        frame_with(&mut app, &ctx, vec![address]);
+        frame_with(&mut app, &ctx, vec![released_v()]);
+
+        assert_eq!(app.pending.len(), 1, "one picture for one paste");
+        assert!(app.composer.is_empty(), "the address stays out of the text");
+    }
+
+    /// A screenshot is a bitmap with no text beside it, so egui emits no paste
+    /// event and only the key release can stage it.
+    #[test]
+    fn a_picture_pasted_alone_is_staged_on_the_release() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        render(&mut app, &ctx);
+        crate::app::hold_clipboard(Vec::new(), Some((2, 2, vec![200; 16])));
+
+        frame_with(&mut app, &ctx, vec![released_v()]);
+
+        assert_eq!(app.pending.len(), 1);
+    }
+
+    /// The composer keeps working for ordinary text. This also shows the text
+    /// field consumes paste events here, which is what makes the empty
+    /// composer in the test above worth asserting.
+    #[test]
+    fn pasted_text_with_an_empty_clipboard_reaches_the_composer() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        app.focus_composer = true;
+        render(&mut app, &ctx);
+        crate::app::hold_clipboard(Vec::new(), None);
+
+        frame_with(&mut app, &ctx, vec![egui::Event::Paste("hello".into())]);
+        frame_with(&mut app, &ctx, vec![released_v()]);
+
+        assert!(app.pending.is_empty(), "text is not an attachment");
+        assert_eq!(app.composer, "hello");
+    }
+
     #[test]
     fn a_pasted_picture_waits_for_its_caption() {
         let mut app = app();
