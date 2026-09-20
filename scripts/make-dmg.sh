@@ -18,6 +18,17 @@ fi
 
 NAME="${MERLIN_DEV_IDENTITY:-Merlin Dev}"
 VERSION="${1:-$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)}"
+
+# zsh does not treat a trailing # as a comment, so a command pasted with one
+# arrives here as arguments. Catching that beats stamping the bundle with it.
+if [ "$#" -gt 1 ] || [ -z "$VERSION" ] || \
+    [ "$VERSION" != "$(printf '%s' "$VERSION" | tr -cd '0-9A-Za-z.-')" ] || \
+    [ -z "$(printf '%s' "$VERSION" | tr -cd '0-9')" ]; then
+    echo "usage: scripts/make-dmg.sh [version]" >&2
+    echo "Run it on its own line, with nothing after it." >&2
+    exit 1
+fi
+
 OUTPUT="dist/Merlin-$VERSION.dmg"
 
 cargo build --release
