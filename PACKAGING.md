@@ -74,6 +74,13 @@ so Gatekeeper lets it through. One sent over the web does carry the flag and is
 refused until the recipient runs `xattr -dr com.apple.quarantine`. Releases for
 other people need the notarized path below.
 
+The installed app and `scripts/dev-run.sh` run at the same time.
+`dev-run.sh` sets `MERLIN_PROFILE=dev`, which `src/profile.rs` turns into a
+separate directory name, instance port, wire prefix and window name, so the
+development build links to the phone as its own device instead of raising the
+installed window. Set `MERLIN_PROFILE=installed` to point a development build
+at the installed app's own data, with the installed app closed.
+
 ## Automatic macOS notarization
 
 `packaging/macos/entitlements.plist` grants microphone access under the hardened

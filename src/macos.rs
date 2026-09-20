@@ -35,29 +35,32 @@ fn name_the_process() {
     use objc2_foundation::{NSProcessInfo, NSString};
 
     let info = NSProcessInfo::processInfo();
-    if info.processName().to_string() != DISPLAY_NAME {
-        info.setProcessName(&NSString::from_str(DISPLAY_NAME));
+    if info.processName().to_string() != display_name() {
+        info.setProcessName(&NSString::from_str(display_name()));
     }
 }
 
 /// The name shown to people, as opposed to the lowercase executable.
-const DISPLAY_NAME: &str = "Merlin";
+fn display_name() -> &'static str {
+    crate::profile::Profile::current().display_name()
+}
 
 fn build_menu() -> tray_icon::menu::Result<Menu> {
+    let name = display_name();
     let menu = Menu::new();
-    let app = Submenu::new(DISPLAY_NAME, true);
+    let app = Submenu::new(name, true);
     app.append_items(&[
-        &item("about", &format!("About {DISPLAY_NAME}"), None),
+        &item("about", &format!("About {name}"), None),
         &Native::separator(),
         &item("settings", "Settings…", Some("Super+Comma")),
         &Native::separator(),
         &Native::services(None),
         &Native::separator(),
-        &Native::hide(Some(format!("Hide {DISPLAY_NAME}").as_str())),
+        &Native::hide(Some(format!("Hide {name}").as_str())),
         &Native::hide_others(None),
         &Native::show_all(None),
         &Native::separator(),
-        &item("quit", &format!("Quit {DISPLAY_NAME}"), Some("Super+KeyQ")),
+        &item("quit", &format!("Quit {name}"), Some("Super+KeyQ")),
     ])?;
     let file = Submenu::new("File", true);
     file.append_items(&[
@@ -94,12 +97,12 @@ fn build_menu() -> tray_icon::menu::Result<Menu> {
         &Native::minimize(None),
         &Native::maximize(Some("Zoom")),
         &Native::separator(),
-        &item("show-window", &format!("Show {DISPLAY_NAME}"), None),
+        &item("show-window", &format!("Show {name}"), None),
     ])?;
     let help = Submenu::new("Help", true);
     help.append_items(&[
         &item("shortcuts", "Keyboard Shortcuts", Some("Super+Slash")),
-        &item("help", &format!("{DISPLAY_NAME} Help"), None),
+        &item("help", &format!("{name} Help"), None),
     ])?;
     menu.append_items(&[&app, &file, &edit, &view, &window, &help])?;
     window.set_as_windows_menu_for_nsapp();

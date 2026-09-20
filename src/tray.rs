@@ -35,7 +35,7 @@ impl ksni::Tray for FastTray {
     }
 
     fn title(&self) -> String {
-        "Merlin".into()
+        crate::profile::Profile::current().display_name().to_owned()
     }
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {

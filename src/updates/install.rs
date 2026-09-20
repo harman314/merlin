@@ -37,6 +37,11 @@ impl Installation {
 }
 
 pub fn detect() -> Result<Installation> {
+    // A development build would otherwise replace its own binary in the
+    // source tree with a release of the installed app.
+    if crate::profile::Profile::current() == crate::profile::Profile::Dev {
+        bail!("This is a development build. Update it by rebuilding the source.");
+    }
     detect_at(&std::env::current_exe()?.canonicalize()?)
 }
 

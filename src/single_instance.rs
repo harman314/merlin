@@ -8,17 +8,23 @@ use std::net::{Ipv4Addr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::profile::Profile;
+
 /// Fixed high loopback port outside the ephemeral range.
 ///
 /// Distinct from the port ZapFast and FastsApp share. Merlin runs beside them,
 /// so it must not answer their handshake or be surfaced by theirs. Sharing both
 /// the port and the wire identity would make each app raise the other's window
-/// and exit instead of starting.
-const INSTANCE_PORT: u16 = 47_143;
+/// and exit instead of starting. The dev profile stands apart from the
+/// installed app on the same grounds.
+fn instance_port() -> u16 {
+    Profile::current().instance_port()
+}
 
 /// Wire identity. Merlin claims no earlier app's name, for the same reason.
-const PREFIX: &str = "merlin:";
-const OK_REPLY: &str = "merlin:ok";
+fn prefix() -> &'static str {
+    Profile::current().wire_prefix()
+}
 
 pub enum Outcome {
     /// This process owns the instance guard.
@@ -51,17 +57,17 @@ impl Guard {
 
 /// Sends one request and verifies the Merlin reply prefix.
 pub fn send(verb: &str) -> std::io::Result<()> {
-    send_to(INSTANCE_PORT, verb)
+    send_to(instance_port(), verb)
 }
 
 fn send_to(port: u16, verb: &str) -> std::io::Result<()> {
     let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))?;
     stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-    stream.write_all(format!("{PREFIX}{verb}\n").as_bytes())?;
+    stream.write_all(format!("{}{verb}\n", prefix()).as_bytes())?;
     // Read the one-line reply until the connection closes.
     let mut reply = String::new();
     stream.read_to_string(&mut reply)?;
-    if reply.lines().next() == Some(OK_REPLY) {
+    if reply.lines().next() == Some(ok_reply().as_str()) {
         Ok(())
     } else {
         Err(std::io::Error::new(
@@ -72,14 +78,15 @@ fn send_to(port: u16, verb: &str) -> std::io::Result<()> {
 }
 
 pub fn acquire(waker: &crate::backend::Waker) -> Outcome {
-    let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, INSTANCE_PORT)) {
+    let port = instance_port();
+    let listener = match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
         Ok(listener) => listener,
         Err(_) => {
             // If the port is held, continue only when it is not Merlin.
             if send("show").is_ok() {
                 return Outcome::Surfaced;
             }
-            log::warn!("port {INSTANCE_PORT} is busy but not with Merlin; running unguarded");
+            log::warn!("port {port} is busy but not with Merlin; running unguarded");
             return Outcome::Only(Guard {
                 commands: Default::default(),
             });
@@ -112,7 +119,7 @@ fn serve(
         };
         // Ignore clients without the Merlin prefix.
         if let Some(command) = parse(&line) {
-            let _ = stream.write_all(format!("{OK_REPLY}\n").as_bytes());
+            let _ = stream.write_all(format!("{}\n", ok_reply()).as_bytes());
             commands
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -122,8 +129,13 @@ fn serve(
     }
 }
 
+/// Reply that proves the listener is this profile and not another program.
+fn ok_reply() -> String {
+    format!("{}ok", prefix())
+}
+
 fn parse(line: &str) -> Option<ControlCommand> {
-    match line.trim_end().strip_prefix(PREFIX)? {
+    match line.trim_end().strip_prefix(prefix())? {
         "show" => Some(ControlCommand::Show),
         "reload-themes" => Some(ControlCommand::ReloadThemes),
         _ => None,
@@ -164,6 +176,8 @@ mod tests {
         assert_eq!(parse("GET / HTTP/1.1"), None);
         assert_eq!(parse("merlin:frobnicate"), None);
         assert_eq!(parse("fastsapp:show"), None);
+        // The dev profile runs beside this one and must not surface it.
+        assert_eq!(parse("merlin-dev:show"), None);
         assert_eq!(parse(""), None);
     }
 

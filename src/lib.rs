@@ -17,6 +17,7 @@ pub mod model;
 pub mod notify;
 pub mod paths;
 pub mod preview;
+pub mod profile;
 pub mod qr;
 pub mod quicklook;
 pub mod settings;

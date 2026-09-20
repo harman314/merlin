@@ -96,7 +96,8 @@ fn main() -> eframe::Result<()> {
         match single_instance::acquire(&waker) {
             single_instance::Outcome::Only(guard) => Some(guard),
             single_instance::Outcome::Surfaced => {
-                eprintln!("Merlin is already running; asked it to show its window");
+                let name = merlin::profile::Profile::current().display_name();
+                eprintln!("{name} is already running; asked it to show its window");
                 return Ok(());
             }
         }
@@ -186,7 +187,7 @@ fn main() -> eframe::Result<()> {
         #[cfg(feature = "demo")]
         let creator_tour_events = cli.demo_tour_events.clone();
         eframe::run_native(
-            "Merlin",
+            merlin::profile::Profile::current().display_name(),
             native_options(demo_persistence.clone()),
             Box::new(move |cc| {
                 creator_waker.attach(&cc.egui_ctx);
@@ -315,11 +316,16 @@ fn native_options(demo_persistence: Option<std::path::PathBuf>) -> eframe::Nativ
     let demo_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
     let demo = demo_persistence.is_some();
     let viewport = egui::ViewportBuilder::default()
-        .with_title(if demo { "Merlin Demo" } else { "Merlin" })
+        .with_title(if demo {
+            "Merlin Demo"
+        } else {
+            merlin::profile::Profile::current().display_name()
+        })
         .with_app_id(if demo {
             "merlin-demo".to_owned()
         } else {
-            std::env::var("FLATPAK_ID").unwrap_or_else(|_| "merlin".to_owned())
+            std::env::var("FLATPAK_ID")
+                .unwrap_or_else(|_| merlin::profile::Profile::current().dir_name().to_owned())
         })
         .with_inner_size(demo_size)
         .with_min_inner_size([720.0, 480.0])

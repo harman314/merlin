@@ -24,14 +24,15 @@ const ADOPTED_NAMES: [&str; 0] = [];
 
 impl AppDirs {
     pub fn discover() -> Self {
-        match Self::of("merlin") {
+        match Self::of(crate::profile::Profile::current().dir_name()) {
             Some(dirs) => dirs,
             None => {
+                let name = crate::profile::Profile::current().dir_name();
                 let fallback = std::env::current_dir().unwrap_or_default();
                 Self {
-                    config: fallback.join("merlin-config"),
-                    state: fallback.join("merlin-state"),
-                    cache: fallback.join("merlin-cache"),
+                    config: fallback.join(format!("{name}-config")),
+                    state: fallback.join(format!("{name}-state")),
+                    cache: fallback.join(format!("{name}-cache")),
                 }
             }
         }

@@ -9,6 +9,11 @@ cd "$(dirname "$0")/.."
 
 NAME="${MERLIN_DEV_IDENTITY:-Merlin Dev}"
 
+# Run as Merlin Dev, a separate app with its own directories, instance port
+# and linked device, so this build and an installed Merlin run at once. Set
+# MERLIN_PROFILE=installed to work on the installed app's own data instead.
+export MERLIN_PROFILE="${MERLIN_PROFILE:-dev}"
+
 # Only a literal profile is consumed. Everything else, --verbose included,
 # belongs to the app.
 PROFILE=debug
