@@ -143,12 +143,28 @@ module changed its indentation and a replacement quietly did nothing, leaving
 a feature missing while every test stayed green. Assert the match, and check
 the result compiles where it actually runs.
 
-**Read an input source once per gesture, in one place.** One Ctrl+V reaches
-the app twice, as a paste event on the press and a key release after it. The
-clipboard was read at both, files at the first and pictures at the second, so
-a clipboard holding a picture and its address staged the picture twice. Two
-rounds of patching the second read failed because the shape was wrong. One
-read, one decision, one record of having decided.
+**One Ctrl+V arrives several times over several frames, and on macOS twice
+over.** egui emits a paste event on the press when the clipboard holds text
+and a key release after it, and the Edit menu in `src/macos.rs` carries its
+own Cmd+V accelerator whose handler pushes a second paste event and a second
+key release. The clipboard was read at more than one of these, so one press
+staged two attachments. Three rounds went into patching the reads before the
+menu was looked at. `paste_staged_at` in `src/app.rs` now holds one window per
+press and nothing clears it early, the key release included, because the
+release is one of the triggers the window has to outlast. Read an input source
+once per gesture, and count the triggers before deciding what a gesture is.
+
+**A macOS-only duplicate is invisible to every test here.** The menu path is
+behind `#[cfg(target_os = "macos")]` and Linux never sees it, so three green
+runs said nothing. When a report only reproduces on the owner's machine, look
+for a platform path that feeds the same queue before touching the shared code.
+
+Still open, and answerable from one `--verbose` paste. If the log shows four
+`paste:` lines, the menu accelerator does not swallow the key event and the
+synthesis in `drain` is redundant whenever the egui window has focus. If it
+shows two, the accelerator does swallow it and the synthesis is the only
+thing making Edit > Paste work. Do not remove it on a guess; the guard makes
+either case correct today.
 
 ## Verifying macOS code
 

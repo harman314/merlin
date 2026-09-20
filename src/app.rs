@@ -30,9 +30,10 @@ pub const REVOKE_WINDOW: Duration = Duration::from_secs(2 * 24 * 60 * 60);
 
 /// How long one Ctrl+V keeps counting as the same paste, in seconds.
 ///
-/// The press and the release reach the app in different frames, and only one
-/// of them may stage the attachment.
-const PASTE_GESTURE: f64 = 0.5;
+/// A single press produces several triggers, spread over several frames. It
+/// has to outlast all of them, so it is generous. Two deliberate pastes
+/// within a second are not a real way to use the app.
+const PASTE_GESTURE: f64 = 1.0;
 
 /// Pause after which a trackpad gesture selects a new axis.
 const SCROLL_GESTURE_GAP: Duration = Duration::from_millis(150);
@@ -227,12 +228,13 @@ pub struct App {
     pub viewer: Option<(ChatId, String)>,
     /// When the memory report was last written.
     memory_logged: Instant,
-    /// When the last paste gesture staged an attachment.
+    /// When the last paste staged an attachment.
     ///
-    /// One Ctrl+V reaches the app twice. egui emits a paste event on the press
-    /// when the clipboard holds text, and the key release arrives a frame or
-    /// more later. Either can be the first to find an attachment, so the one
-    /// that stages it records the time and the other stands down.
+    /// One Ctrl+V reaches here several times. egui emits a paste event on the
+    /// press when the clipboard holds text and a key release after it, and on
+    /// macOS the Edit menu's own Cmd+V accelerator synthesises a second pair
+    /// of both. Whichever arrives first stages and records the time, and the
+    /// rest stand down until the window passes.
     paste_staged_at: Option<f64>,
     /// Chat filter in the forwarding destination dialog.
     pub forward_search: String,
@@ -2894,12 +2896,13 @@ impl App {
                     .retain(|event| !matches!(event, egui::Event::Paste(_)));
             });
         }
-        // The release ends the gesture, so the next paste starts clean rather
-        // than waiting out the window. A gesture cut short by a lost window
-        // leaves the record behind, which is what the window is for.
-        if released {
-            self.paste_staged_at = None;
-        }
+        // The window is never cleared early, least of all on the key release.
+        // The release is one of the triggers it has to outlast, and for a
+        // screenshot it is the trigger that staged.
+        log::debug!(
+            "paste: event {pasted_text}, release {released}, composing {mine}, \
+             within the last paste {spent}, staged {staged}"
+        );
     }
 
     /// Stages whatever the clipboard holds for the open chat, files first.

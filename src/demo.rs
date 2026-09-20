@@ -2177,6 +2177,67 @@ mod tests {
         assert_eq!(app.pending.len(), 1);
     }
 
+    /// The macOS Edit menu carries its own Cmd+V accelerator, and its handler
+    /// pushes a paste event and a key release of its own while winit delivers
+    /// the real ones. One press therefore arrives as two whole gestures.
+    #[test]
+    fn the_menu_accelerator_and_the_real_keys_stage_once_between_them() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        app.focus_composer = true;
+        render(&mut app, &ctx);
+        crate::app::hold_clipboard(Vec::new(), Some((2, 2, vec![200; 16])));
+
+        let pair = || {
+            vec![
+                egui::Event::Paste("https://example.invalid/cat.png".into()),
+                released_v(),
+            ]
+        };
+        frame_with(&mut app, &ctx, pair());
+        frame_with(&mut app, &ctx, pair());
+
+        assert_eq!(app.pending.len(), 1, "one picture for one press");
+        assert!(app.composer.is_empty(), "the address stays out of the text");
+    }
+
+    /// The guard has to outlive the key release. A screenshot is staged by the
+    /// release itself, so clearing the guard there cleared it in the same
+    /// frame it was set and left everything after it unprotected.
+    #[test]
+    fn a_release_after_the_one_that_staged_adds_nothing() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        render(&mut app, &ctx);
+        crate::app::hold_clipboard(Vec::new(), Some((2, 2, vec![200; 16])));
+
+        frame_with(&mut app, &ctx, vec![released_v()]);
+        frame_with(&mut app, &ctx, vec![released_v()]);
+
+        assert_eq!(app.pending.len(), 1, "one picture for one gesture");
+    }
+
+    /// The same, for a clipboard that also carries text.
+    #[test]
+    fn a_release_after_a_paste_event_adds_nothing() {
+        let mut app = app();
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        app.focus_composer = true;
+        render(&mut app, &ctx);
+        crate::app::hold_clipboard(Vec::new(), Some((2, 2, vec![200; 16])));
+
+        let address = egui::Event::Paste("https://example.invalid/cat.png".into());
+        frame_with(&mut app, &ctx, vec![address]);
+        frame_with(&mut app, &ctx, vec![released_v()]);
+        frame_with(&mut app, &ctx, vec![released_v()]);
+
+        assert_eq!(app.pending.len(), 1, "one picture for one gesture");
+        assert!(app.composer.is_empty(), "the address stays out of the text");
+    }
+
     /// The composer keeps working for ordinary text. This also shows the text
     /// field consumes paste events here, which is what makes the empty
     /// composer in the test above worth asserting.
