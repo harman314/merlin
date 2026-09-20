@@ -17,8 +17,8 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 
-if security find-certificate -c "$NAME" >/dev/null 2>&1; then
-    echo "\"$NAME\" already exists. Nothing to do."
+if security find-identity -v -p codesigning | grep -qF "$NAME"; then
+    echo "\"$NAME\" already exists. Build with scripts/dev-run.sh."
     exit 0
 fi
 
@@ -33,22 +33,25 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -addext "keyUsage=critical,digitalSignature" \
     -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1
 
-openssl pkcs12 -export -inkey "$work/key.pem" -in "$work/cert.pem" \
-    -out "$work/identity.p12" -passout pass: >/dev/null 2>&1
+# The key and certificate go in separately. A PKCS#12 bundle would be tidier,
+# but OpenSSL 3 writes one macOS cannot read, and which openssl is on PATH is
+# not ours to decide. The keychain pairs them by public key.
+security import "$work/key.pem" -k "$KEYCHAIN" -T /usr/bin/codesign >/dev/null
+security import "$work/cert.pem" -k "$KEYCHAIN" -T /usr/bin/codesign >/dev/null
 
-# -T lets codesign use the key without prompting for it separately.
-security import "$work/identity.p12" -k "$KEYCHAIN" -P "" \
-    -T /usr/bin/codesign -T /usr/bin/security >/dev/null
-
-# Without trust, codesign rejects the certificate as unsuitable.
+# codesign rejects a certificate it does not trust for signing code.
 echo "Trusting the certificate for code signing needs your admin password."
 sudo security add-trusted-cert -d -r trustRoot \
     -p codeSign -k /Library/Keychains/System.keychain "$work/cert.pem"
 
-# Stops the keychain prompting again the first time codesign reads the key.
-security set-key-partition-list -S apple-tool:,apple: -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || true
-
-echo
-echo "Created \"$NAME\"."
-echo "Build and run with: scripts/dev-run.sh"
-echo "The first launch still asks for the keychain once. Choose Always Allow."
+if security find-identity -v -p codesigning | grep -qF "$NAME"; then
+    echo
+    echo "Created \"$NAME\"."
+    echo "Build and run with: scripts/dev-run.sh"
+    echo "The first launch asks for the keychain once. Choose Always Allow."
+else
+    echo
+    echo "The identity did not register. codesign cannot see \"$NAME\"." >&2
+    echo "Check: security find-identity -v -p codesigning" >&2
+    exit 1
+fi
