@@ -57,6 +57,23 @@ for commands and supported formats.
 To upgrade the tool, change `tool.version` in `native-packages.yaml`, the matching immutable workflow reference, and any release-job gem installation
 pin together. Applications need no packaging Gemfile, lockfile or Ruby wrapper.
 
+## A DMG for your own Mac
+
+`scripts/make-dmg.sh` builds a release binary, bundles it, and writes
+`dist/Merlin-VERSION.dmg`. Mount it and drag Merlin across, the same as any
+other Mac app.
+
+```sh
+scripts/make-dmg.sh
+```
+
+The app is signed with the local `Merlin Dev` certificate when
+`scripts/dev-identity.sh` has created one, and ad-hoc otherwise. Neither is a
+Developer ID. A DMG built on the Mac that opens it carries no quarantine flag,
+so Gatekeeper lets it through. One sent over the web does carry the flag and is
+refused until the recipient runs `xattr -dr com.apple.quarantine`. Releases for
+other people need the notarized path below.
+
 ## Automatic macOS notarization
 
 `packaging/macos/entitlements.plist` grants microphone access under the hardened
