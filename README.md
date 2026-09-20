@@ -340,6 +340,12 @@ cargo test --all-features                      # includes a headless layout of e
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
+On macOS, run it through `scripts/dev-run.sh` rather than `cargo run`. macOS
+ties keychain access to an app's signing identity, and an unsigned binary gets
+a new one every compile, so it asks for the keychain password on every build.
+`scripts/dev-identity.sh` creates a self-signed identity once, and
+`dev-run.sh` builds, signs with it, and launches. Then Always Allow sticks.
+
 To include a default GIPHY key for GIF search, set it at build time. A key in
 Settings overrides it:
 
