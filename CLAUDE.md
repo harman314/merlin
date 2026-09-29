@@ -154,6 +154,20 @@ press and nothing clears it early, the key release included, because the
 release is one of the triggers the window has to outlast. Read an input source
 once per gesture, and count the triggers before deciding what a gesture is.
 
+**A transient status must never be the only record of a permanent fact.**
+Unlinking left the window on an empty chat list with no way to link again.
+`on_logged_out` set `LoggedOut`, then called `start_bot`, which reports
+`Connecting`, and `is_linked` in `src/app.rs` counts `Connecting` and
+`Disconnected` as linked. The one honest status lived for a few
+milliseconds. The unlinked state is now restored after the restart and held
+until a code arrives.
+
+`is_linked` is still the weak point. It answers "is a device paired" with
+"what is the socket doing", patched with a check on whether any chats are
+loaded. A cold first launch flashes the empty window for the same reason.
+The real fix is to track whether a device is paired and let the connection
+status say only what the connection is doing.
+
 **A macOS-only duplicate is invisible to every test here.** The menu path is
 behind `#[cfg(target_os = "macos")]` and Linux never sees it, so three green
 runs said nothing. When a report only reproduces on the owner's machine, look

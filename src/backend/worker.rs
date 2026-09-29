@@ -1361,6 +1361,14 @@ impl Worker {
         self.set_status(LinkStatus::LoggedOut);
         // Recreate the store so the next connection starts linking.
         self.start_bot().await;
+        // start_bot reports Connecting, which the window reads as linked and
+        // answers with an empty chat list and no way to link again. There is
+        // no device until pairing succeeds, so say so and hold it until a
+        // code arrives or the store refuses to open.
+        if !matches!(self.status, LinkStatus::Failed(_)) {
+            let status = self.unlinked();
+            self.set_status(status);
+        }
     }
 
     fn on_contact_update(&mut self, update: &wa_events::ContactUpdate) {
@@ -6298,6 +6306,34 @@ mod receipt_tests {
             .collect();
         assert!(badges.contains(&Some(86_400)));
         assert_eq!(badges.last(), Some(&None));
+    }
+
+    /// Unlinking left the window on an empty chat list with no way back.
+    /// start_bot reports Connecting, which the window reads as linked, so the
+    /// only honest status was overwritten a moment after it was set.
+    #[tokio::test]
+    async fn unlinking_ends_waiting_for_a_new_code() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        worker.on_logged_out().await;
+
+        assert!(
+            matches!(worker.status, LinkStatus::Unlinked { .. }),
+            "ended on {:?}",
+            worker.status
+        );
+        // The window reads the status it was sent, not the worker's field.
+        let told: Vec<_> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                Event::Link(status) => Some(status),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            matches!(told.last(), Some(LinkStatus::Unlinked { .. })),
+            "the window was last told {:?}",
+            told.last()
+        );
     }
 
     #[tokio::test]
