@@ -423,6 +423,11 @@ impl Worker {
                 for chat in &mut chats {
                     self.polish_chat(chat);
                 }
+                log::debug!(
+                    "chats: {} listed, {} pinned",
+                    chats.len(),
+                    chats.iter().filter(|chat| chat.pinned).count()
+                );
                 self.emit(Event::Chats(chats));
             }
             Err(error) => log::warn!("could not list chats: {error}"),
@@ -1190,6 +1195,11 @@ impl Worker {
             }
             E::PinUpdate(update) => {
                 let chat = self.canonical(&update.jid);
+                log::debug!(
+                    "pin update: pinned={:?} at {}",
+                    update.action.pinned,
+                    update.timestamp.timestamp_millis()
+                );
                 self.ensure_chat(&chat, None);
                 let _ = self.archive.set_pinned_at(
                     &chat,
@@ -1404,13 +1414,16 @@ impl Worker {
     fn on_receipt(&mut self, receipt: &wa_events::Receipt) {
         self.learn_source(&receipt.source);
         let chat = self.canonical(&receipt.source.chat);
+        // A sender, a chat id and a message id are personal data and never
+        // reach the log. The type, the counts and the flags are what a
+        // receipt report needs.
         log::debug!(
-            "receipt {:?} from {} (chat {chat}, from me: {}, offline: {}) for {:?}",
+            "receipt {:?} for {} message(s) in a {:?} chat (from me: {}, offline: {})",
             receipt.r#type,
-            receipt.source.sender,
+            receipt.message_ids.len(),
+            ChatKind::from_id(&chat),
             receipt.source.is_from_me,
-            receipt.offline,
-            receipt.message_ids
+            receipt.offline
         );
         let status = match receipt.r#type {
             ReceiptType::Delivered => Delivery::Delivered,
@@ -1437,7 +1450,14 @@ impl Worker {
             }
             // Own-device delivery counts as read only in the self chat.
             ReceiptType::Sender if chat == self.me() => Delivery::Read,
-            _ => return,
+            // Nothing here moves a tick. The library downgrades a delivery
+            // ack to Sent for a peer that cannot receive the message, so a
+            // single tick is right, but a silent drop leaves no way to tell
+            // that apart from a receipt that never arrived.
+            ref other => {
+                log::debug!("receipt {other:?} ignored");
+                return;
+            }
         };
         let at = receipt.timestamp.timestamp();
         if ChatKind::from_id(&chat) == ChatKind::Group {
@@ -1483,7 +1503,7 @@ impl Worker {
             }
         }
         log::debug!(
-            "receipt moved {changed} of {} messages in {chat} to {status:?}",
+            "receipt moved {changed} of {} message(s) to {status:?}",
             receipt.message_ids.len()
         );
         // Read receipts advance all earlier messages.
@@ -2105,6 +2125,16 @@ impl Worker {
             let id = self.canonical_str(id);
             self.remember_push_name(&id, name);
         }
+        // Counts only. A chat id is a phone number and never reaches the log.
+        let carried_pins = parsed
+            .chats
+            .iter()
+            .filter(|chat| chat.pinned_at.is_some_and(|when| when > 0))
+            .count();
+        log::debug!(
+            "history: {} chats, {carried_pins} carrying a pin, metadata {metadata}",
+            parsed.chats.len()
+        );
         for chat in parsed.chats {
             let id = self.canonical_str(&chat.id);
             if id.ends_with("@broadcast") {
