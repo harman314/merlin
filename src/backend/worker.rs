@@ -1197,17 +1197,21 @@ impl Worker {
             }
             E::PinUpdate(update) => {
                 let chat = self.canonical(&update.jid);
-                log::debug!(
-                    "pin update: pinned={:?} at {}",
-                    update.action.pinned,
-                    update.timestamp.timestamp_millis()
-                );
                 self.ensure_chat(&chat, None);
-                let _ = self.archive.set_pinned_at(
-                    &chat,
-                    update.action.pinned.unwrap_or(false),
-                    update.timestamp.timestamp_millis(),
-                );
+                let at = update.timestamp.timestamp_millis();
+                let pinned = update.action.pinned.unwrap_or(false);
+                // Whether the write landed matters as much as whether the pin
+                // arrived. A pin addressed by a privacy id this archive has
+                // not mapped yet lands on a row of its own and moves to the
+                // real chat only once put_lid learns the pair.
+                match self.archive.set_pinned_at(&chat, pinned, at) {
+                    Ok(changed) => log::debug!(
+                        "pin update: pinned={pinned} at {at}, stored={changed}, \
+                         canonical={}",
+                        self.canonical_str(&chat) == chat
+                    ),
+                    Err(error) => log::warn!("could not store a pin: {error}"),
+                }
                 self.emit_chat(&chat);
             }
             E::MuteUpdate(update) => {
@@ -2877,7 +2881,9 @@ impl Worker {
                 });
             }
             Command::SetPinned(chat, pinned) => {
-                let _ = self.archive.set_pinned(&chat, pinned);
+                if let Err(error) = self.archive.set_pinned(&chat, pinned) {
+                    log::warn!("could not store a pin: {error}");
+                }
                 self.emit_chat(&chat);
                 self.tell_phone(&chat, move |client, jid| async move {
                     if pinned {

@@ -320,20 +320,23 @@ impl Archive {
         Ok(())
     }
 
-    pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<()> {
+    pub fn set_pinned(&self, id: &str, pinned: bool) -> Result<bool> {
         self.set_pinned_at(id, pinned, jiff::Timestamp::now().as_millisecond())
     }
 
     /// Apply app-state in timestamp order. A later history chunk has no state
     /// version and must not overwrite a pin/unpin already received from sync.
-    pub fn set_pinned_at(&self, id: &str, pinned: bool, timestamp: i64) -> Result<()> {
-        self.connection.execute(
+    ///
+    /// Returns whether a row changed. A pin for a chat this archive does not
+    /// hold matches nothing, and the caller has no other way to notice.
+    pub fn set_pinned_at(&self, id: &str, pinned: bool, timestamp: i64) -> Result<bool> {
+        let changed = self.connection.execute(
             "UPDATE chats SET pinned = ?2, pinned_at = CASE WHEN ?2 THEN ?3 ELSE 0 END,
                 pin_updated_at = ?3 WHERE id = ?1
                 AND (pin_updated_at IS NULL OR pin_updated_at <= ?3)",
             params![id, pinned, timestamp],
         )?;
-        Ok(())
+        Ok(changed > 0)
     }
 
     pub fn set_muted(&self, id: &str, until: Option<i64>) -> Result<()> {
