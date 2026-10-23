@@ -1490,6 +1490,18 @@ impl Worker {
         let mut newest = 0;
         let mut changed = 0;
         for id in &receipt.message_ids {
+            // Only our own messages carry ticks. The group path above checks
+            // this and advance_statuses below filters on it; without it here a
+            // receipt naming an incoming message draws ticks on one received.
+            if !self
+                .archive
+                .message(&chat, id)
+                .ok()
+                .flatten()
+                .is_some_and(|row| row.from_me)
+            {
+                continue;
+            }
             match self.archive.set_status(&chat, id, status, at) {
                 Ok(true) => {
                     changed += 1;
@@ -6953,6 +6965,36 @@ mod receipt_tests {
                 .status,
             Delivery::Read,
             "a message to ourselves is read once the phone has it"
+        );
+    }
+
+    /// Only our own messages carry ticks. The group path checked this and the
+    /// direct path did not, so a receipt naming a received message stamped a
+    /// delivery status onto it.
+    #[test]
+    fn a_receipt_naming_an_incoming_message_leaves_it_alone() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.archive.ensure_chat(PEER, "R").expect("chat");
+        let mut theirs = own_message("T1", 100);
+        theirs.from_me = false;
+        theirs.sender = PEER.to_owned();
+        theirs.status = Delivery::None;
+        worker
+            .archive
+            .insert_message(&theirs, None)
+            .expect("stored");
+
+        worker.on_receipt(&receipt(PEER, &["T1"], ReceiptType::Delivered));
+
+        assert_eq!(
+            worker
+                .archive
+                .message(PEER, "T1")
+                .expect("read")
+                .expect("row")
+                .status,
+            Delivery::None,
+            "a received message has no ticks to move"
         );
     }
 
