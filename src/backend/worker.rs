@@ -662,6 +662,7 @@ impl Worker {
         };
         match self.archive.take_preferences_refresh() {
             Ok(true) => {
+                log::debug!("preferences: requesting a full app state snapshot");
                 tokio::spawn(async move {
                     use whatsapp_rust::{WAPatchName, sync_task::MajorSyncTask};
                     // The protocol library owns collection locking, full
@@ -675,9 +676,10 @@ impl Worker {
                             })
                             .await;
                     }
+                    log::debug!("preferences: the app state snapshot finished");
                 });
             }
-            Ok(false) => {}
+            Ok(false) => log::debug!("preferences: the snapshot request is already spent"),
             Err(error) => log::warn!("could not schedule chat preference recovery: {error}"),
         }
     }
