@@ -1182,18 +1182,28 @@ impl Archive {
     }
 
     /// Older archives discarded pin times and could lose mute sync. Request
-    /// one library-managed snapshot for an existing archive. Fresh links
-    /// already receive snapshots; reconnecting must not add another request.
+    /// one library-managed snapshot for an archive that holds chats, and
+    /// never more than one, so reconnecting adds no request.
+    ///
+    /// An empty archive answers nothing, so it does not spend the request.
+    /// Unlinking empties the archive, and the snapshot a re-link receives
+    /// carries chats without their pins, so spending it there left an
+    /// archive of 697 chats and no pins with no way left to ask.
     pub fn take_preferences_refresh(&self) -> Result<bool> {
-        const KEY: &str = "chat_preferences_refresh_v1";
+        // v2 gives an archive that spent the v1 request on an empty table
+        // the one request it never really had.
+        const KEY: &str = "chat_preferences_refresh_v2";
         if self.meta(KEY)?.is_some() {
             return Ok(false);
         }
         let existing: bool =
             self.connection
                 .query_row("SELECT EXISTS(SELECT 1 FROM chats)", [], |row| row.get(0))?;
+        if !existing {
+            return Ok(false);
+        }
         self.set_meta(KEY, "requested")?;
-        Ok(existing)
+        Ok(true)
     }
 
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
@@ -1403,12 +1413,19 @@ pub(crate) mod tests {
         }
         let archive = Archive::open_with_key(&path, &key).unwrap();
         assert!(!archive.take_preferences_refresh().unwrap());
+        // An empty archive does not spend the request. Unlinking empties the
+        // archive, so this is the state a re-link starts from, and the
+        // snapshot it receives brings chats without their pins.
         let fresh = Archive::in_memory().unwrap();
         assert!(!fresh.take_preferences_refresh().unwrap());
         fresh
             .ensure_chat("1@s.whatsapp.net", "Initial history")
             .unwrap();
-        assert!(!fresh.take_preferences_refresh().unwrap());
+        assert!(
+            fresh.take_preferences_refresh().unwrap(),
+            "chats arrived, so the request is still owed"
+        );
+        assert!(!fresh.take_preferences_refresh().unwrap(), "and owed once");
     }
 
     #[test]
