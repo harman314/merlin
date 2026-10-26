@@ -105,6 +105,10 @@ const CHAT_COLUMNS: &str =
                     m.from_me, m.sender_name, m.content, m.status, m.sender, c.participants, c.read_only,
                     c.pinned_at, c.ephemeral_expiration";
 
+/// Marks the one app-state snapshot request as spent. v2 gives an archive
+/// that spent v1 on an empty chat table the request it never really had.
+const PREFERENCES_REFRESH_KEY: &str = "chat_preferences_refresh_v2";
+
 /// Adds columns introduced after the initial schema when missing.
 const MIGRATIONS: &[(&str, &str, &str)] = &[
     ("messages", "thumbnail", "BLOB"),
@@ -1193,9 +1197,7 @@ impl Archive {
     /// carries chats without their pins, so spending it there left an
     /// archive of 697 chats and no pins with no way left to ask.
     pub fn take_preferences_refresh(&self) -> Result<bool> {
-        // v2 gives an archive that spent the v1 request on an empty table
-        // the one request it never really had.
-        const KEY: &str = "chat_preferences_refresh_v2";
+        const KEY: &str = PREFERENCES_REFRESH_KEY;
         if self.meta(KEY)?.is_some() {
             return Ok(false);
         }
@@ -1207,6 +1209,18 @@ impl Archive {
         }
         self.set_meta(KEY, "requested")?;
         Ok(true)
+    }
+
+    /// Makes the one preference-snapshot request owed again.
+    ///
+    /// The request is one server round trip and nothing repeats it on its
+    /// own, so an owner whose pins never arrived needs a way to ask again.
+    pub fn clear_preferences_refresh(&self) -> Result<()> {
+        self.connection.execute(
+            "DELETE FROM meta WHERE key = ?1",
+            params![PREFERENCES_REFRESH_KEY],
+        )?;
+        Ok(())
     }
 
     pub fn set_meta(&self, key: &str, value: &str) -> Result<()> {
@@ -1429,6 +1443,11 @@ pub(crate) mod tests {
             "chats arrived, so the request is still owed"
         );
         assert!(!fresh.take_preferences_refresh().unwrap(), "and owed once");
+        fresh.clear_preferences_refresh().unwrap();
+        assert!(
+            fresh.take_preferences_refresh().unwrap(),
+            "clearing owes it again, for an owner whose pins never arrived"
+        );
     }
 
     #[test]

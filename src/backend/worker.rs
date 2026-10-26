@@ -660,6 +660,14 @@ impl Worker {
         let Some(client) = self.client.clone() else {
             return;
         };
+        // An escape hatch for a request that was spent without delivering any
+        // pins. One round trip, asked for by hand, and nothing asks on its own.
+        if std::env::var_os("MERLIN_RESYNC_PREFERENCES").is_some() {
+            match self.archive.clear_preferences_refresh() {
+                Ok(()) => log::debug!("preferences: the request was owed again by hand"),
+                Err(error) => log::warn!("could not owe the request again: {error}"),
+            }
+        }
         match self.archive.take_preferences_refresh() {
             Ok(true) => {
                 log::debug!("preferences: requesting a full app state snapshot");
