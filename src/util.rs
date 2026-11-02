@@ -323,6 +323,16 @@ pub fn tray_template_rgba(size: usize) -> Vec<u8> {
     rgba
 }
 
+/// Builds one of the generated protobuf types, which are non-exhaustive and so
+/// reject a struct literal. Assignment through a closure keeps a test fixture
+/// readable where a literal used to sit.
+#[cfg(any(test, feature = "demo"))]
+pub fn proto<T: Default>(fill: impl FnOnce(&mut T)) -> T {
+    let mut value = T::default();
+    fill(&mut value);
+    value
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

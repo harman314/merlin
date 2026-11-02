@@ -180,6 +180,44 @@ shows two, the accelerator does swallow it and the synthesis is the only
 thing making Edit > Paste work. Do not remove it on a guess; the guard makes
 either case correct today.
 
+## The protocol library
+
+Pinned to a commit, not a crates.io release, because the published crate
+enables `simd` and needs nightly. The pin carries upstream #1698 and #1788,
+which fix primary-device snapshot recovery. Without them a snapshot whose MAC
+does not validate is discarded, the resend from the phone is ignored, and
+pins, mutes and phone-side read state never arrive. The owner's install sat in
+that loop with 697 chats and no pins.
+
+Moving the pin is a migration, not a version bump. The jump from
+860744fb to d136bbc5 took about 130 edits:
+
+- Ids are their own types. `MessageId` rejects an empty string and converts at
+  the archive and UI boundary; `info.id` and `push_name` are compact strings.
+- Most generated protos and the media option structs are `#[non_exhaustive]`,
+  so a struct literal does not compile, **including** with
+  `..Default::default()`. Production code assigns onto a default, media options
+  go through `media_options` in `src/backend/worker.rs`, and test fixtures go
+  through `util::proto`.
+- The typed facades have `_raw` siblings that keep the old call shape:
+  `edit_message_raw`, `revoke_message_raw`, `send_reaction_raw`, `vote_raw`,
+  `decrypt_vote_raw`. Prefer those over building a `MessageRef` or `PollRef`
+  where the call already has the parts.
+- `client.download` takes a byte budget. `DownloadLimits::default()` is
+  unbounded, which is what the old call did.
+- A group participant carries its own phone number and privacy id, so the
+  LID pairing comes off the row rather than a metadata lookup.
+
+Two choices in that migration were judgement, not mechanism. The download
+budget is unbounded to preserve the old behaviour, and the fallback arm for
+`EndOfHistoryTransferType` treats an unknown terminator as "nothing more on
+the phone". If disappearing-message timers or on-demand history misbehave,
+look there first.
+
+Nothing here was tested against WhatsApp. The gates prove it compiles and the
+unit tests pass; sending, polls, forwarding and the pin sync itself need a
+real account.
+
 ## Verifying macOS code
 
 This environment cannot build the app for macOS; a dependency needs a
