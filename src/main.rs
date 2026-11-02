@@ -102,8 +102,12 @@ fn main() -> eframe::Result<()> {
             }
         }
     };
+    // The library logs some of its own diagnostics under bare targets rather
+    // than module paths, so a crate-level directive misses them. `AppState`
+    // carries the probe that says whether a failing snapshot MAC accuses the
+    // key or the hash, which is the only thing that tells those apart.
     let default_filter = if cli.verbose {
-        "info,merlin=debug,whatsapp_rust=debug,wacore=debug"
+        "info,merlin=debug,whatsapp_rust=debug,wacore=debug,AppState=debug,Client=debug"
     } else {
         "warn,merlin=info"
     };
