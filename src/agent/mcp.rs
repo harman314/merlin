@@ -11,17 +11,23 @@ use super::Request;
 use super::http::Service;
 
 /// Revision of the protocol this speaks.
+/// The one revision this server speaks.
+///
+/// `structuredContent`, which every answer here carries, arrived in this
+/// revision. A stateless server cannot remember what it negotiated, so it
+/// cannot drop that field for an older client, and claiming a revision it
+/// would then violate is worse than naming one. A client that asked for
+/// something else gets this back and decides whether to carry on, which is
+/// what the transport asks of a server with no version in common.
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 
 const PARSE_ERROR: i64 = -32700;
 const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
+const INVALID_PARAMS: i64 = -32602;
 
 #[derive(Debug, Deserialize)]
 struct Message {
-    /// Absent on a notification, which takes no reply.
-    #[serde(default)]
-    id: Option<serde_json::Value>,
     method: String,
     #[serde(default)]
     params: serde_json::Value,
@@ -33,6 +39,12 @@ struct ToolCall {
     name: String,
     #[serde(default)]
     arguments: serde_json::Value,
+    /// The protocol reserves `_meta` on every request, and clients put a
+    /// progress token in it. Nothing here acts on it, but the envelope has to
+    /// accept it or the call never reaches the tool. Unknown fields stay
+    /// refused, and tool arguments reject their own unknown names separately.
+    #[serde(default)]
+    _meta: serde_json::Value,
 }
 
 fn object(properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
@@ -60,8 +72,56 @@ fn chat_id() -> serde_json::Value {
     })
 }
 
+/// A tool that only reads the archive on this machine.
+fn reads() -> serde_json::Value {
+    // `destructiveHint` and `idempotentHint` only carry meaning for a tool
+    // that writes, so a read-only tool leaves them out.
+    serde_json::json!({ "readOnlyHint": true, "openWorldHint": false })
+}
+
+/// A tool that reaches WhatsApp. `destructive` marks one a client should
+/// confirm first, because other people see what it did.
+fn writes(destructive: bool) -> serde_json::Value {
+    serde_json::json!({
+        "readOnlyHint": false,
+        "destructiveHint": destructive,
+        "idempotentHint": !destructive,
+        "openWorldHint": true,
+    })
+}
+
+/// Display title and annotations per tool.
+///
+/// A name with no entry is advertised as writing and destructive, so a tool
+/// added without one is over-restricted rather than passed off as read-only. A
+/// test catches the missing title.
+fn facts(name: &str) -> (&'static str, serde_json::Value) {
+    match name {
+        "status" => ("Status", reads()),
+        "list_chats" => ("List chats", reads()),
+        "get_chat" => ("Chat details", reads()),
+        "get_messages" => ("Read messages", reads()),
+        "search_messages" => ("Search messages", reads()),
+        "list_contacts" => ("List contacts", reads()),
+        "send_text" => ("Send a message", writes(true)),
+        "react" => ("React to a message", writes(false)),
+        "mark_read" => ("Mark a chat read", writes(false)),
+        _ => ("", writes(true)),
+    }
+}
+
+/// Builds one catalogue entry. The annotations let a client treat the three
+/// writing tools differently without reading the prose. They are hints only:
+/// what an agent may actually do is decided by `agent::Policy::gate`.
 fn tool(name: &str, description: &str, schema: serde_json::Value) -> serde_json::Value {
-    serde_json::json!({ "name": name, "description": description, "inputSchema": schema })
+    let (title, annotations) = facts(name);
+    serde_json::json!({
+        "name": name,
+        "title": title,
+        "description": description,
+        "inputSchema": schema,
+        "annotations": annotations,
+    })
 }
 
 /// The catalogue an MCP client reads before calling anything.
@@ -197,8 +257,8 @@ pub fn tools() -> Vec<serde_json::Value> {
 
 /// Answers one JSON-RPC message. `None` is a notification, which takes no reply.
 pub async fn handle(service: &Service, body: &[u8]) -> Option<serde_json::Value> {
-    let message: Message = match serde_json::from_slice(body) {
-        Ok(message) => message,
+    let envelope: serde_json::Value = match serde_json::from_slice(body) {
+        Ok(envelope) => envelope,
         Err(error) => {
             // Without an id there is nobody to answer, so report against null.
             return Some(error_for(
@@ -208,9 +268,39 @@ pub async fn handle(service: &Service, body: &[u8]) -> Option<serde_json::Value>
             ));
         }
     };
-    let Some(id) = message.id.clone() else {
-        // `notifications/initialized` and friends: nothing to send back.
-        return None;
+    // Batching left the protocol in this revision. Deserializing a struct from
+    // an array otherwise reports a type error against the first element, which
+    // reads like a malformed single message.
+    if envelope.is_array() {
+        return Some(error_for(
+            serde_json::Value::Null,
+            INVALID_REQUEST,
+            "this server takes one message per request; batching is not part of \
+             the protocol from 2025-06-18",
+        ));
+    }
+    // An absent id is a notification. A null id is neither, and answering it
+    // as a notification hides a client bug behind an empty 202.
+    let id = match envelope.get("id") {
+        None => return None,
+        Some(serde_json::Value::Null) => {
+            return Some(error_for(
+                serde_json::Value::Null,
+                INVALID_REQUEST,
+                "a request id must not be null",
+            ));
+        }
+        Some(id) => id.clone(),
+    };
+    let message: Message = match serde_json::from_value(envelope) {
+        Ok(message) => message,
+        Err(error) => {
+            return Some(error_for(
+                id,
+                INVALID_REQUEST,
+                &format!("could not read the message: {error}"),
+            ));
+        }
     };
     match message.method.as_str() {
         "initialize" => Some(result_for(
@@ -237,7 +327,7 @@ pub async fn handle(service: &Service, body: &[u8]) -> Option<serde_json::Value>
                 Err(error) => {
                     return Some(error_for(
                         id,
-                        INVALID_REQUEST,
+                        INVALID_PARAMS,
                         &format!("could not read the tool call: {error}"),
                     ));
                 }
@@ -420,6 +510,118 @@ mod tests {
             .as_str()
             .expect("text");
         assert!(text.contains("text is required"), "{text}");
+    }
+
+    /// The bug this suite missed on the first pass. The protocol reserves
+    /// `_meta` on every request and Claude Code puts a progress token there,
+    /// so a strict envelope refused every tool call from every real client
+    /// while these tests, which sent no `_meta`, stayed green.
+    #[tokio::test]
+    async fn a_progress_token_in_meta_does_not_stop_the_call() {
+        let answer = handle(
+            &service(),
+            br#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{
+                 "name":"send_text","arguments":{"chat":"c","text":"hi"},
+                 "_meta":{"progressToken":"abc"}}}"#,
+        )
+        .await
+        .expect("a reply");
+        // The worker stub is not wired up here, so reaching it is the proof:
+        // the envelope parsed and the tool ran.
+        assert!(answer["error"].is_null(), "{answer}");
+        assert!(answer["result"]["isError"].is_boolean(), "{answer}");
+    }
+
+    /// Accepting `_meta` must not turn into accepting anything.
+    #[tokio::test]
+    async fn an_invented_envelope_field_is_still_refused() {
+        let answer = handle(
+            &service(),
+            br#"{"jsonrpc":"2.0","id":5,"method":"tools/call",
+                 "params":{"name":"status","arguments":{},"sudo":true}}"#,
+        )
+        .await
+        .expect("a reply");
+        assert_eq!(answer["error"]["code"], INVALID_PARAMS);
+        let message = answer["error"]["message"].as_str().expect("text");
+        assert!(message.contains("sudo"), "{message}");
+    }
+
+    #[tokio::test]
+    async fn a_batch_is_refused_in_terms_a_client_can_act_on() {
+        let answer = handle(&service(), br#"[{"jsonrpc":"2.0","id":1,"method":"ping"}]"#)
+            .await
+            .expect("a reply");
+        assert_eq!(answer["error"]["code"], INVALID_REQUEST);
+        let message = answer["error"]["message"].as_str().expect("text");
+        assert!(message.contains("batching"), "{message}");
+    }
+
+    /// An absent id is a notification; a null id is a malformed request. Both
+    /// used to come back as an empty acknowledgement.
+    #[tokio::test]
+    async fn a_null_id_is_a_bad_request_rather_than_a_notification() {
+        let answer = handle(
+            &service(),
+            br#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
+        )
+        .await
+        .expect("a reply");
+        assert_eq!(answer["error"]["code"], INVALID_REQUEST);
+        assert!(
+            handle(&service(), br#"{"jsonrpc":"2.0","method":"ping"}"#)
+                .await
+                .is_none()
+        );
+    }
+
+    /// A client that asks for a revision this server does not speak gets one
+    /// it does, and decides for itself whether to carry on.
+    #[tokio::test]
+    async fn an_unknown_protocol_revision_still_gets_a_supported_one_back() {
+        let answer = handle(
+            &service(),
+            br#"{"jsonrpc":"2.0","id":6,"method":"initialize",
+                 "params":{"protocolVersion":"2024-11-05"}}"#,
+        )
+        .await
+        .expect("a reply");
+        assert_eq!(answer["result"]["protocolVersion"], PROTOCOL_VERSION);
+    }
+
+    /// Reading and sending are two separate switches in Settings. A client
+    /// cannot honour that distinction if it has to read the prose to find it.
+    #[test]
+    fn only_the_three_writing_tools_are_marked_as_writing() {
+        let mut writing: Vec<String> = Vec::new();
+        for entry in tools() {
+            let name = entry["name"].as_str().expect("a name");
+            let annotations = &entry["annotations"];
+            assert!(
+                entry["title"]
+                    .as_str()
+                    .is_some_and(|title| !title.is_empty()),
+                "{name} has no display title, so `facts` has no entry for it"
+            );
+            match annotations["readOnlyHint"].as_bool() {
+                Some(true) => assert_eq!(annotations["openWorldHint"], false, "{name}"),
+                Some(false) => writing.push(name.to_owned()),
+                None => panic!("{name} declares no readOnlyHint"),
+            }
+        }
+        writing.sort();
+        assert_eq!(writing, ["mark_read", "react", "send_text"]);
+    }
+
+    /// Only a sent message cannot be taken back.
+    #[test]
+    fn sending_is_the_one_tool_marked_destructive() {
+        let destructive: Vec<String> = tools()
+            .iter()
+            .filter(|entry| entry["annotations"]["destructiveHint"] == true)
+            .map(|entry| entry["name"].as_str().expect("a name").to_owned())
+            .collect();
+        assert_eq!(destructive, ["send_text"]);
     }
 
     #[tokio::test]
