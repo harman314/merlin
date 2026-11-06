@@ -36,6 +36,7 @@ use whatsapp_rust::waproto::buffa::Message as _;
 use whatsapp_rust::{MediaRetryResult, MediaReuploadRequest};
 use whatsapp_rust::{MessageId, ProfilePictureRequest, ProfilePictureTarget, ProfilePictureType};
 
+mod agent;
 mod poll_history;
 mod polls;
 
@@ -200,6 +201,8 @@ pub async fn run(
     commands: mpsc::UnboundedSender<Command>,
     mut inbox: mpsc::UnboundedReceiver<Command>,
     waker: Waker,
+    agent_policy: Arc<crate::agent::Policy>,
+    mut agent_inbox: mpsc::UnboundedReceiver<crate::agent::Call>,
 ) {
     let archive = loop {
         let path = dirs.archive_db();
@@ -263,6 +266,8 @@ pub async fn run(
         poll_decrypting: 0,
         poll_history: Default::default(),
         poll_sending: HashSet::new(),
+        agent_policy,
+        agent_budget: Default::default(),
     };
     worker.load_state();
     worker.backfill();
@@ -280,6 +285,7 @@ pub async fn run(
                 }
             }
             Some(event) = wa_events.recv() => worker.handle_wa_event(event).await,
+            Some(call) = agent_inbox.recv() => worker.handle_agent(call),
             _ = async {
                 match deadline {
                     Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
@@ -304,6 +310,10 @@ pub async fn run(
 }
 
 struct Worker {
+    /// What the agent API may do, mirrored from the user's settings.
+    agent_policy: Arc<crate::agent::Policy>,
+    /// Rolling cap on agent-initiated sends.
+    agent_budget: crate::agent::SendBudget,
     read_sync: ReadSync,
     poll_decrypting: usize,
     poll_history: poll_history::Requests,
@@ -2558,7 +2568,9 @@ impl Worker {
                 text,
                 quoting,
                 mentions,
-            } => self.send_text(chat, text, quoting, mentions),
+            } => {
+                self.send_text(chat, text, quoting, mentions);
+            }
             Command::Forward {
                 from_chat,
                 message,
@@ -3139,16 +3151,18 @@ impl Worker {
         }
     }
 
+    /// Archives the message, queues the send, and returns the new message id.
+    /// `None` means there was no connection to hand it to.
     fn send_text(
         &mut self,
         chat: ChatId,
         text: String,
         quoting: Option<String>,
         mentions: Vec<String>,
-    ) {
+    ) -> Option<String> {
         let (Some(client), Some(jid)) = (self.client.clone(), Self::jid_of(&chat)) else {
             self.emit(Event::Error("Not connected to WhatsApp".to_owned()));
-            return;
+            return None;
         };
         let mut quoted_row = None;
         let context = quoting.as_deref().and_then(|id| {
@@ -3206,10 +3220,11 @@ impl Worker {
             self.commands.clone(),
             chat,
             jid,
-            id,
+            id.clone(),
             message,
             expiration,
         ));
+        Some(id)
     }
 
     fn forward_message(&mut self, from_chat: ChatId, message_id: String, to_chat: ChatId) {
@@ -5945,8 +5960,8 @@ mod receipt_tests {
     use super::*;
     use crate::model::{Content, Delivery, Message};
 
-    const ME: &str = "15550001111@s.whatsapp.net";
-    const PEER: &str = "4917663430455@s.whatsapp.net";
+    pub(super) const ME: &str = "15550001111@s.whatsapp.net";
+    pub(super) const PEER: &str = "4917663430455@s.whatsapp.net";
     const PEER_LID: &str = "167650256810092@lid";
 
     /// Creates a test worker with an in-memory archive and open channels.
@@ -6028,6 +6043,8 @@ mod receipt_tests {
             read_sync: ReadSync::default(),
             poll_decrypting: 0,
             poll_history: Default::default(),
+            agent_policy: crate::agent::Policy::new(true, true, true),
+            agent_budget: Default::default(),
             poll_sending: HashSet::new(),
         };
         (worker, events_rx, inbox, wa_events)

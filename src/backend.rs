@@ -562,6 +562,11 @@ impl Waker {
 /// UI handle to the backend runtime.
 pub struct Backend {
     commands: mpsc::UnboundedSender<Command>,
+    /// Requests from the local agent API. A oneshot carries each answer back,
+    /// so these cannot ride the cloneable `Command` channel.
+    agent: mpsc::UnboundedSender<crate::agent::Call>,
+    /// What the agent API may do. The interface writes it, the worker reads it.
+    agent_policy: Arc<crate::agent::Policy>,
     events: std::sync::mpsc::Receiver<Event>,
     thread: Option<std::thread::JoinHandle<()>>,
     offline: bool,
@@ -570,9 +575,17 @@ pub struct Backend {
 }
 
 impl Backend {
-    pub fn spawn(dirs: AppDirs, waker: Waker) -> Self {
+    pub fn spawn(dirs: AppDirs, waker: Waker, agent: crate::agent::Setup) -> Self {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let (agent_tx, agent_rx) = mpsc::unbounded_channel();
+        let crate::agent::Setup {
+            policy: agent_policy,
+            port: agent_port,
+            token_file: agent_token,
+        } = agent;
+        let policy = Arc::clone(&agent_policy);
+        let server_calls = agent_tx.clone();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .thread_name("merlin-runtime")
@@ -584,7 +597,27 @@ impl Backend {
             .name("merlin-backend".to_string())
             .spawn(move || {
                 runtime.block_on(async move {
-                    worker::run(dirs, event_tx, worker_commands, command_rx, waker).await;
+                    // The window must open whether or not the port is free, so
+                    // a failure here only logs.
+                    let server = match agent_port {
+                        Some(port) => {
+                            crate::agent::http::start(port, &agent_token, server_calls).await
+                        }
+                        None => None,
+                    };
+                    worker::run(
+                        dirs,
+                        event_tx,
+                        worker_commands,
+                        command_rx,
+                        waker,
+                        agent_policy,
+                        agent_rx,
+                    )
+                    .await;
+                    if let Some(server) = server {
+                        server.abort();
+                    }
                 });
                 runtime.shutdown_timeout(Duration::from_secs(3));
             })
@@ -592,6 +625,8 @@ impl Backend {
 
         Self {
             commands: command_tx,
+            agent: agent_tx,
+            agent_policy: policy,
             events: event_rx,
             thread: Some(thread),
             offline: false,
@@ -600,13 +635,26 @@ impl Backend {
         }
     }
 
+    /// Channel the local agent API sends its requests down.
+    pub fn agent_channel(&self) -> mpsc::UnboundedSender<crate::agent::Call> {
+        self.agent.clone()
+    }
+
+    /// Shared permissions the interface updates when Settings change.
+    pub fn agent_policy(&self) -> Arc<crate::agent::Policy> {
+        Arc::clone(&self.agent_policy)
+    }
+
     /// Creates a disconnected backend and event sender for demos and tests.
     pub fn detached() -> (Self, std::sync::mpsc::Sender<Event>) {
         let (command_tx, _command_rx) = mpsc::unbounded_channel();
         let (event_tx, event_rx) = std::sync::mpsc::channel();
+        let (agent_tx, _agent_rx) = mpsc::unbounded_channel();
         (
             Self {
                 commands: command_tx,
+                agent: agent_tx,
+                agent_policy: crate::agent::Policy::off(),
                 events: event_rx,
                 thread: None,
                 offline: true,

@@ -211,6 +211,20 @@ protocol. These notes are for coding agents and new contributors.
   `Client::fetch_message_history` → a `HistorySync` chunk with
   `sync_type == ON_DEMAND`); the archive is paged first, the phone only
   when it is exhausted.
+- `src/agent/` is the local API an agent on the same computer uses to read
+  chats and reply. The worker owns the only archive connection, so a request
+  crosses its own channel (`agent::Call`, answered on a oneshot) and is served
+  in `backend/worker/agent.rs` between commands; a transport never touches the
+  archive. `agent::Request::from_call` is the single parser both transports
+  use, and it rejects unknown argument names rather than defaulting them.
+  `agent::Policy` mirrors the user's settings into the worker, so the gate sits
+  in one place whatever the transport; `agent::SendBudget` caps agent sends.
+  `agent/http.rs` serves loopback HTTP on hyper, `agent/mcp.rs` speaks MCP over
+  the same socket, `agent/token.rs` owns the bearer token, `agent/wire.rs` the
+  response shapes. Those shapes are deliberately not `model::` types: an
+  archive row carries a JPEG thumbnail and download state no agent wants, and a
+  public API must not pin the interface's structs. Never add a response field
+  that carries message contents into a log line.
 - Platform-specific code belongs behind `cfg` blocks; a change for one
   platform must keep the other two compiling.
 

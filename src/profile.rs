@@ -55,6 +55,14 @@ impl Profile {
         }
     }
 
+    /// Loopback port the local agent API listens on, next to the instance port.
+    pub fn agent_port(self) -> u16 {
+        match self {
+            Self::Installed => 47_145,
+            Self::Dev => 47_146,
+        }
+    }
+
     /// Wire identity, so neither profile answers the other's handshake.
     pub fn wire_prefix(self) -> &'static str {
         match self {
@@ -84,6 +92,12 @@ mod tests {
         assert_ne!(installed.dir_name(), dev.dir_name());
         assert_ne!(installed.display_name(), dev.display_name());
         assert_ne!(installed.instance_port(), dev.instance_port());
+        assert_ne!(installed.agent_port(), dev.agent_port());
+        // Neither profile's agent port may land on an instance port.
+        for profile in [installed, dev] {
+            assert_ne!(profile.agent_port(), installed.instance_port());
+            assert_ne!(profile.agent_port(), dev.instance_port());
+        }
         assert_ne!(installed.wire_prefix(), dev.wire_prefix());
     }
 
@@ -94,6 +108,7 @@ mod tests {
         assert_eq!(Profile::Installed.dir_name(), "merlin");
         assert_eq!(Profile::Installed.display_name(), "Merlin");
         assert_eq!(Profile::Installed.instance_port(), 47_143);
+        assert_eq!(Profile::Installed.agent_port(), 47_145);
         assert_eq!(Profile::Installed.wire_prefix(), "merlin:");
     }
 }

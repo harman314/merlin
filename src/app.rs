@@ -113,6 +113,8 @@ pub struct Presence {
 
 pub struct App {
     pub dirs: AppDirs,
+    /// Shared with the worker: what the local agent API may do.
+    agent_policy: std::sync::Arc<crate::agent::Policy>,
     pub settings: Settings,
     settings_dirty: bool,
     last_settings_save: Instant,
@@ -336,7 +338,8 @@ impl Default for AppOptions {
 
 impl App {
     pub fn new(waker: &Waker, dirs: AppDirs, settings: Settings, options: AppOptions) -> Self {
-        let backend = Backend::spawn(dirs.clone(), waker.clone());
+        let agent = crate::agent::Setup::from_settings(&settings, &dirs);
+        let backend = Backend::spawn(dirs.clone(), waker.clone(), agent);
         let mut app = Self::with_backend(dirs, settings, backend, waker.clone());
         app.custom_themes.enable_desktop_themes();
         app.load_custom_themes();
@@ -369,8 +372,10 @@ impl App {
                 _ => Palette::dark(),
             });
         let open_chat = settings.last_chat.clone();
+        let agent_policy = backend.agent_policy();
         let mut app = Self {
             dirs,
+            agent_policy,
             settings,
             settings_dirty: false,
             last_settings_save: Instant::now(),
@@ -1867,6 +1872,13 @@ impl App {
     fn save_settings(&mut self) {
         self.settings_dirty = false;
         self.last_settings_save = Instant::now();
+        // The worker reads these on its next agent request, so a toggle in
+        // Settings takes effect without a restart.
+        self.agent_policy.set(
+            self.settings.agent_api,
+            self.settings.agent_can_send,
+            self.settings.send_read_receipts,
+        );
         if let Err(error) = self.settings.save(&self.dirs.settings_file()) {
             log::warn!("could not save settings: {error}");
         }

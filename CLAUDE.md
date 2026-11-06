@@ -35,6 +35,24 @@ wire prefix and the display name together, and `dev-run.sh` sets it. Anything
 new that would collide between two running copies belongs in that one file,
 beside the four that are already there.
 
+**The agent API is off until the owner turns it on, and reading and sending
+are two separate switches.** The token file is the whole credential: anything
+that can read it can read this account's chats and send as the owner. So the
+defaults are both off, the listener binds `127.0.0.1` only, no cross-origin
+header is ever sent, and the file is `0600`.
+
+- The gate lives in the worker (`agent::Policy::gate`), not in the transport,
+  so a second transport cannot be added that forgets it.
+- Sends go only to conversations that already exist. Messaging an arbitrary
+  number is a V3 question, not an oversight.
+- `agent::SendBudget` caps agent sends at 20 a minute. A looping agent is the
+  expected failure, not a hypothetical one.
+- Turning the API on needs a restart because the listener binds at startup.
+  Turning it off is immediate because the policy refuses before the worker
+  answers. Live rebinding was not worth the moving parts.
+- The log gets the tool name and the outcome. Never the chat id, never the
+  text. That rule is what makes `merlin.log` safe to attach to a bug report.
+
 ## Interface
 
 **There is no design system, and that is the root cause of most "this looks

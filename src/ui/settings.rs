@@ -150,6 +150,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         },
                     );
 
+                    section(ui, app, "Agent access");
+                    toggle(ui, app, "Local agent API", "Let agents running on this computer read your chats through Merlin. It listens on 127.0.0.1 only, behind a token. Run `merlin agent` in a terminal for the address, the token, and how to register it. Anything that can read the token file can read your chats, so keep it to agents you run yourself. Turning this on takes effect when Merlin next starts; turning it off stops answers at once.", |settings| &mut settings.agent_api);
+                    toggle(ui, app, "Let agents send messages", "Without this an agent can read but not write. Agent sends are capped at 20 a minute, and only to conversations you already have.", |settings| &mut settings.agent_can_send);
+
                     section(ui, app, "Account");
                     let name = app.me_name.clone().unwrap_or_default();
                     let me = app.me.clone().unwrap_or_default();

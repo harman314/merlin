@@ -103,6 +103,11 @@ impl AppDirs {
     }
 
     /// Current-run log, replaced at startup.
+    /// Bearer token for the local agent API. Owner-readable only.
+    pub fn agent_token_file(&self) -> PathBuf {
+        self.config.join("agent-token")
+    }
+
     pub fn log_file(&self) -> PathBuf {
         self.state.join("merlin.log")
     }

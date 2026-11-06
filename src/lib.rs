@@ -1,5 +1,6 @@
 //! Merlin internals exposed for diagnostics and tests.
 
+pub mod agent;
 pub mod animation;
 pub mod app;
 pub mod archive;

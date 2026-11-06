@@ -483,6 +483,14 @@ impl Archive {
         rows.collect()
     }
 
+    /// Number of chats, without reading every row.
+    pub fn chat_count(&self) -> Result<usize> {
+        let count: i64 = self
+            .connection
+            .query_row("SELECT COUNT(*) FROM chats", [], |row| row.get(0))?;
+        Ok(count.max(0) as usize)
+    }
+
     pub fn chat(&self, id: &str) -> Result<Option<Chat>> {
         let mut statement = self.connection.prepare(&format!(
             "SELECT {CHAT_COLUMNS} {CHAT_JOIN} WHERE c.id = ?1"

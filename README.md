@@ -153,6 +153,11 @@ See **[github.com/harman314/merlin](https://github.com/harman314/merlin)** for d
   ordinary files in the cache directory. Unlinking deletes both and removes this device from
   your phone.
 
+- **Agent access.** Merlin can expose your chats to an agent running on the
+  same computer: Claude Code, a local script, anything that speaks HTTP or MCP.
+  It is off until you turn it on in **Settings -> Agent access**. See
+  [Agent access](#agent-access) below.
+
 ## What it does not do yet
 
 - Play ordinary videos in the app (they open in your player), or reply to
@@ -270,6 +275,7 @@ to your phone and linked devices.
 | Attachments, avatars | `~/.cache/merlin/` | Safe to delete |
 | Saved stickers and packs | `~/.local/state/merlin/stickers/` | Plain WebP files; each pack is a folder |
 | Log of the last run | `~/.local/state/merlin/merlin.log` | `--verbose` for more |
+| Agent token | `~/.config/merlin/agent-token` | Created when the agent API first starts; mode `0600` |
 
 macOS and Windows use the standard platform directories selected by the
 `directories` crate. On first start, Merlin moves settings, the linked session,
@@ -283,6 +289,52 @@ On Linux and macOS, Merlin restricts its configuration, state, and cache
 directories to the current user (`0700`), including existing installations.
 Startup stops if those directories cannot be created or secured, before opening
 logs or databases. Windows uses the permissions inherited from your user profile.
+
+## Agent access
+
+Merlin can let an agent on this computer read your conversations and reply for
+you. It is off by default. Turn it on in **Settings -> Agent access**, then run:
+
+```sh
+merlin agent
+```
+
+That prints the address, the token, and the line that registers it with Claude
+Code. Merlin listens on `127.0.0.1` only, and every request needs the token.
+
+| | |
+| --- | --- |
+| Address | `http://127.0.0.1:47145` (dev profile: `47146`) |
+| MCP endpoint | `POST /mcp` |
+| Plain endpoints | `POST /v1/<tool>`, or `POST /v1/rpc` with `{"method", "params"}` |
+| Token | `~/.config/merlin/agent-token`, mode `0600` |
+| Header | `Authorization: Bearer <token>` |
+
+Tools: `status`, `list_chats`, `get_chat`, `get_messages`, `search_messages`,
+`list_contacts`, `send_text`, `react`, `mark_read`.
+
+```sh
+curl -s -H "Authorization: Bearer $(cat ~/.config/merlin/agent-token)" \
+  -d '{"limit":5,"unread_only":true}' \
+  http://127.0.0.1:47145/v1/list_chats
+```
+
+What it will and will not do:
+
+- Reading is allowed whenever the API is on. Sending needs the separate
+  **Let agents send messages** switch, which is also off by default.
+- Sends go only to conversations you already have, and are capped at 20 a
+  minute. Announcement groups are refused.
+- `mark_read` follows your own read-receipt setting.
+- Turning the API on takes effect when Merlin next starts. Turning it off, or
+  turning sending off, stops answers at once.
+- Nothing is served to a browser: no cross-origin headers are sent, and a
+  request addressed to anything but this machine is refused.
+- The log records the tool name and whether it succeeded, never chat ids or
+  message text.
+
+The token is the whole credential. Anything that can read that file can read
+your chats and send messages as you, so keep it to agents you run yourself.
 
 ### Local themes
 

@@ -56,7 +56,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # transport, ureq media downloads, and the SQLite device store. The window
 # handles shutdown instead of `signal`.
 whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d136bbc5f5209d543e3b8927d9232ad9b3dfdb9d", default-features = false, features = ["sqlite-storage", "tokio-transport", "tokio-runtime", "ureq-client", "tokio-native"] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util"] }
+# Serves the loopback agent API. These are already in the tree through reqwest
+# and the protocol library; only hyper's server side is new.
+hyper = { version = "1", default-features = false, features = ["server", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = "0.1"
 # SQLCipher encrypts the archive; the device store shares the same library.
 # Bundle OpenSSL so all release platforms use the same encryption provider.
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }

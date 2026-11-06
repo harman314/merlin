@@ -70,6 +70,45 @@ struct Cli {
 enum Control {
     /// Reload palettes in an already-running Merlin without showing its window.
     ReloadThemes,
+    /// Print the local agent API address and token, and how to register it.
+    Agent,
+}
+
+/// Prints what a local agent needs to reach this Merlin, creating the token on
+/// first use. The token is a credential, so this prints it only when asked.
+fn print_agent_setup() -> anyhow::Result<()> {
+    let dirs = paths::AppDirs::discover();
+    dirs.ensure()?;
+    let path = dirs.agent_token_file();
+    let token = merlin::agent::token::Token::load_or_create(&path)?;
+    let token = token.as_str();
+    let profile = merlin::profile::Profile::current();
+    let port = profile.agent_port();
+    let url = format!("http://127.0.0.1:{port}{}", merlin::agent::http::MCP_PATH);
+
+    println!("{} agent API", profile.display_name());
+    println!("  address  {url}");
+    println!("  token    {token}");
+    println!("  file     {}", path.display());
+    println!();
+    println!("Register it with Claude Code:");
+    println!("  claude mcp add --transport http merlin {url} \\");
+    println!("    --header \"Authorization: Bearer {token}\"");
+    println!();
+    println!("If that version does not pass the header through, use:");
+    // One line: a backslash inside single quotes is literal, not a continuation.
+    println!(
+        "  claude mcp add-json merlin '{{\"type\":\"http\",\"url\":\"{url}\",\"headers\":{{\"Authorization\":\"Bearer {token}\"}}}}'"
+    );
+    println!();
+    println!("Or call it directly:");
+    println!("  curl -s -H \"Authorization: Bearer {token}\" \\");
+    println!("    -d '{{\"limit\":5}}' http://127.0.0.1:{port}/v1/list_chats");
+    println!();
+    println!("The API is off until you turn it on in Settings, under Agent access.");
+    println!("Anything that can read the token file can read your chats and send");
+    println!("messages as you, so keep it to agents you run yourself.");
+    Ok(())
 }
 
 fn main() -> eframe::Result<()> {
@@ -83,6 +122,10 @@ fn main() -> eframe::Result<()> {
         single_instance::send("reload-themes")
             .map_err(|error| eframe::Error::AppCreation(error.into()))?;
         return Ok(());
+    }
+    // Neither of these opens a window, so they run before the instance guard.
+    if matches!(cli.command, Some(Control::Agent)) {
+        return print_agent_setup().map_err(|error| eframe::Error::AppCreation(error.into()));
     }
     let waker = backend::Waker::default();
     #[cfg(feature = "demo")]

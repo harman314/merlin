@@ -78,6 +78,10 @@ pub struct Settings {
     pub voice_speed: f32,
     /// Also add saved contacts to the phone's address book.
     pub save_contacts_to_phone: bool,
+    /// Serve the local agent API on loopback. Off until the user turns it on.
+    pub agent_api: bool,
+    /// Let an agent send messages and reactions. Off leaves it reading only.
+    pub agent_can_send: bool,
 }
 
 impl Default for Settings {
@@ -105,6 +109,8 @@ impl Default for Settings {
             names_from_contacts: true,
             save_contacts_to_phone: true,
             voice_speed: 1.0,
+            agent_api: false,
+            agent_can_send: false,
         }
     }
 }
