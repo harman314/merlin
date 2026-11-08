@@ -175,6 +175,29 @@ pub struct Accepted {
     pub status: &'static str,
 }
 
+/// A downloaded attachment. An MCP client also gets an image inline.
+#[derive(Debug, Serialize)]
+pub struct AttachmentFile {
+    pub chat: String,
+    pub message: String,
+    /// `image`, `video`, `audio`, `document`, `sticker`, or `gif`.
+    pub kind: &'static str,
+    pub mime: String,
+    /// Bytes on disk, which can differ from what the sender declared.
+    pub size: u64,
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file_name: Option<String>,
+}
+
+/// The name the sender gave a document. Other attachments have none.
+pub fn file_name_of(content: &Content) -> Option<String> {
+    match content {
+        Content::Document { file_name, .. } if !file_name.is_empty() => Some(file_name.clone()),
+        _ => None,
+    }
+}
+
 /// RFC 3339 in UTC, which is what a machine reader wants.
 pub fn at(unix_seconds: i64) -> Option<String> {
     jiff::Timestamp::from_second(unix_seconds)

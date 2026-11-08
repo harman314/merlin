@@ -31,16 +31,34 @@ pub struct Service {
     pub token: Token,
 }
 
+/// Longest an answer may take. Only an attachment download comes near it.
+const ANSWER_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
 impl Service {
     /// Hands a request to the worker and waits for its answer.
     pub async fn ask(&self, request: Request) -> Result<serde_json::Value, Failure> {
+        self.ask_within(request, ANSWER_LIMIT).await
+    }
+
+    async fn ask_within(
+        &self,
+        request: Request,
+        limit: std::time::Duration,
+    ) -> Result<serde_json::Value, Failure> {
         let (reply, receiver) = oneshot::channel();
         self.calls
             .send(Call { request, reply })
             .map_err(|_| Failure::Internal("the backend has stopped".to_owned()))?;
-        receiver
-            .await
-            .map_err(|_| Failure::Internal("the backend dropped the request".to_owned()))?
+        match tokio::time::timeout(limit, receiver).await {
+            Ok(Ok(answer)) => answer,
+            Ok(Err(_)) => Err(Failure::Internal(
+                "the backend dropped the request".to_owned(),
+            )),
+            Err(_) => Err(Failure::Unavailable(format!(
+                "no answer within {} seconds",
+                limit.as_secs()
+            ))),
+        }
     }
 }
 
@@ -517,6 +535,29 @@ mod tests {
         let server = start(0, &path, calls).await.expect("a server");
         assert!(path.exists());
         server.abort();
+    }
+
+    /// A download that never finishes must not hold the agent forever.
+    #[tokio::test]
+    async fn a_request_with_no_answer_gives_up_rather_than_hanging() {
+        let (calls, mut receiver) = mpsc::unbounded_channel::<Call>();
+        let service = Service {
+            calls,
+            token: Token::generate().expect("a token"),
+        };
+        // Holds every call and answers none.
+        let silent = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Some(call) = receiver.recv().await {
+                held.push(call);
+            }
+        });
+        let failure = service
+            .ask_within(Request::Status, std::time::Duration::from_millis(50))
+            .await
+            .expect_err("a time-out");
+        assert_eq!(failure.code(), "unavailable");
+        silent.abort();
     }
 
     #[test]

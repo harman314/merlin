@@ -79,6 +79,11 @@ pub enum Request {
     MarkRead {
         chat: String,
     },
+    /// The file behind a message's attachment, downloaded if need be.
+    GetAttachment {
+        chat: String,
+        message: String,
+    },
 }
 
 /// What the worker sends back. Shapes live in [`wire`].
@@ -110,6 +115,9 @@ pub enum Failure {
     Refused(String),
     /// No phone link, so nothing can leave the machine.
     Offline,
+    /// WhatsApp's servers could not supply what was asked for, such as an
+    /// attachment that has expired and that the phone would not re-upload.
+    Unavailable(String),
     /// The archive or the protocol library failed.
     Internal(String),
 }
@@ -122,6 +130,7 @@ impl Failure {
             Self::Invalid(_) => "invalid_request",
             Self::Refused(_) => "refused",
             Self::Offline => "offline",
+            Self::Unavailable(_) => "unavailable",
             Self::Internal(_) => "internal",
         }
     }
@@ -132,6 +141,7 @@ impl Failure {
             Self::Invalid(_) => 400,
             Self::Refused(_) => 403,
             Self::Offline => 503,
+            Self::Unavailable(_) => 502,
             Self::Internal(_) => 500,
         }
     }
@@ -139,7 +149,10 @@ impl Failure {
     pub fn message(&self) -> String {
         match self {
             Self::NotFound(what) => format!("no {what} by that id"),
-            Self::Invalid(why) | Self::Refused(why) | Self::Internal(why) => why.clone(),
+            Self::Invalid(why)
+            | Self::Refused(why)
+            | Self::Unavailable(why)
+            | Self::Internal(why) => why.clone(),
             Self::Offline => "Merlin is not linked to a phone right now".to_owned(),
         }
     }
@@ -216,6 +229,13 @@ struct SendTextArgs {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
+struct MessageArgs {
+    chat: Option<String>,
+    message: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 struct ReactArgs {
     chat: Option<String>,
     message: Option<String>,
@@ -235,6 +255,7 @@ impl Request {
             Self::SendText { .. } => "send_text",
             Self::React { .. } => "react",
             Self::MarkRead { .. } => "mark_read",
+            Self::GetAttachment { .. } => "get_attachment",
         }
     }
 
@@ -321,6 +342,13 @@ impl Request {
                 let args: ChatArgs = parse(arguments)?;
                 Ok(Self::MarkRead {
                     chat: required(args.chat, "chat")?,
+                })
+            }
+            "get_attachment" => {
+                let args: MessageArgs = parse(arguments)?;
+                Ok(Self::GetAttachment {
+                    chat: required(args.chat, "chat")?,
+                    message: required(args.message, "message")?,
                 })
             }
             other => Err(Failure::Invalid(format!("no method named {other}"))),
@@ -493,6 +521,7 @@ mod tests {
             ("get_messages", "chat"),
             ("search_messages", "query"),
             ("mark_read", "chat"),
+            ("get_attachment", "chat"),
         ] {
             let failure =
                 Request::from_call(method, serde_json::json!({})).expect_err("a rejection");
@@ -544,6 +573,10 @@ mod tests {
             ("get_messages", serde_json::json!({ "chat": "c" })),
             ("search_messages", serde_json::json!({ "query": "x" })),
             ("list_contacts", serde_json::json!({})),
+            (
+                "get_attachment",
+                serde_json::json!({ "chat": "c", "message": "m" }),
+            ),
         ];
         for (method, arguments) in reads {
             let request = Request::from_call(method, arguments).expect("a request");

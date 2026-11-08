@@ -4,25 +4,40 @@
 //! on its thread between commands. Every answer is a [`wire`] shape built here;
 //! nothing in this file touches the interface or the settings file.
 
+use std::path::Path;
+
+use tokio::sync::oneshot;
+
 use crate::agent::{Call, Failure, Reply, Request, wire};
 use crate::model::ChatId;
 
 use super::Worker;
 
+/// Sends an answer and logs the method and outcome. Never the chat id or the
+/// text, which are personal data.
+fn send_logged(reply: oneshot::Sender<Reply>, method: &str, answer: Reply) {
+    match &answer {
+        Ok(_) => log::info!("agent: {method} ok"),
+        Err(failure) => log::info!("agent: {method} {}", failure.code()),
+    }
+    let _ = reply.send(answer);
+}
+
 impl Worker {
     /// Gates the request, answers it, and sends the result back.
     pub(super) fn handle_agent(&mut self, call: Call) {
-        let method = call.request.method();
-        let reply = self
-            .agent_policy
-            .gate(&call.request)
-            .and_then(|()| self.answer_agent(call.request));
-        // Method and outcome only. Chat ids and message text are personal data.
-        match &reply {
-            Ok(_) => log::info!("agent: {method} ok"),
-            Err(failure) => log::info!("agent: {method} {}", failure.code()),
+        let Call { request, reply } = call;
+        if let Err(failure) = self.agent_policy.gate(&request) {
+            return send_logged(reply, request.method(), Err(failure));
         }
-        let _ = call.reply.send(reply);
+        // A download takes as long as the network does, so this answer may
+        // come later, from `resolve_agent_downloads`.
+        if let Request::GetAttachment { chat, message } = request {
+            return self.agent_get_attachment(chat, message, reply);
+        }
+        let method = request.method();
+        let answer = self.answer_agent(request);
+        send_logged(reply, method, answer);
     }
 
     fn answer_agent(&mut self, request: Request) -> Reply {
@@ -54,6 +69,10 @@ impl Worker {
                 emoji,
             } => self.agent_react(chat, message, emoji),
             Request::MarkRead { chat } => self.agent_mark_read(chat),
+            // Answered by `handle_agent`, which may have to wait for it.
+            Request::GetAttachment { .. } => Err(Failure::Internal(
+                "attachment requests are answered separately".to_owned(),
+            )),
         }
     }
 
@@ -272,6 +291,93 @@ impl Worker {
         json(&serde_json::json!({ "chat": chat, "receipts": receipts }))
     }
 
+    // --- attachments -----------------------------------------------------
+
+    /// Answers at once when the file is on disk. Otherwise parks the reply and
+    /// starts the download, or joins one an earlier request started.
+    fn agent_get_attachment(
+        &mut self,
+        chat: ChatId,
+        message: String,
+        reply: oneshot::Sender<Reply>,
+    ) {
+        match self.attachment_on_disk(&chat, &message) {
+            Err(failure) => return send_logged(reply, "get_attachment", Err(failure)),
+            Ok(Some(file)) => return send_logged(reply, "get_attachment", Ok(file)),
+            Ok(None) => {}
+        }
+        let key = (chat.clone(), message.clone());
+        if let Some(waiting) = self.agent_downloads.get_mut(&key) {
+            // A request that timed out has dropped its receiver. When every
+            // one has, that download is probably stuck, so start afresh
+            // rather than queue behind it.
+            waiting.retain(|parked| !parked.is_closed());
+            if !waiting.is_empty() {
+                waiting.push(reply);
+                return;
+            }
+        }
+        if self.client.is_none() {
+            return send_logged(reply, "get_attachment", Err(Failure::Offline));
+        }
+        // Parked before starting, because a download that fails before it
+        // reaches the network finishes inside this call.
+        self.agent_downloads.insert(key, vec![reply]);
+        self.download(chat, message);
+    }
+
+    /// The attachment's file when it is already on this computer, `None` when
+    /// it has to be fetched first.
+    fn attachment_on_disk(
+        &self,
+        chat: &str,
+        message: &str,
+    ) -> Result<Option<serde_json::Value>, Failure> {
+        self.chat_or_missing(chat)?;
+        let row = self
+            .archive
+            .message(chat, message)
+            .map_err(internal)?
+            .ok_or_else(|| Failure::NotFound("message".to_owned()))?;
+        let Some(media) = row.content.media() else {
+            return Err(Failure::Invalid(
+                "this message has no attachment to fetch".to_owned(),
+            ));
+        };
+        // The cache is safe to delete, so a recorded path can point at nothing.
+        match media.path.as_deref() {
+            Some(path) if path.is_file() => attachment_reply(&row, path).map(Some),
+            _ => Ok(None),
+        }
+    }
+
+    /// Answers every request parked on this file. Any finished download of it
+    /// counts, including one the window started.
+    pub(super) fn resolve_agent_downloads(
+        &mut self,
+        chat: &str,
+        id: &str,
+        result: &Result<std::path::PathBuf, String>,
+    ) {
+        let Some(waiting) = self
+            .agent_downloads
+            .remove(&(chat.to_owned(), id.to_owned()))
+        else {
+            return;
+        };
+        let answer = match result {
+            Ok(path) => match self.archive.message(chat, id) {
+                Ok(Some(row)) => attachment_reply(&row, path),
+                Ok(None) => Err(Failure::NotFound("message".to_owned())),
+                Err(error) => Err(internal(error)),
+            },
+            Err(error) => Err(Failure::Unavailable(error.clone())),
+        };
+        for reply in waiting {
+            send_logged(reply, "get_attachment", answer.clone());
+        }
+    }
+
     // --- helpers ---------------------------------------------------------
 
     fn chat_or_missing(&self, chat: &str) -> Result<crate::model::Chat, Failure> {
@@ -285,6 +391,23 @@ impl Worker {
     fn sender_name(&self, row: &crate::model::Message) -> Option<String> {
         self.name_for(&row.sender)
     }
+}
+
+fn attachment_reply(row: &crate::model::Message, path: &Path) -> Reply {
+    let media = row
+        .content
+        .media()
+        .ok_or_else(|| Failure::Invalid("this message has no attachment to fetch".to_owned()))?;
+    let size = std::fs::metadata(path).map_err(internal)?.len();
+    json(&wire::AttachmentFile {
+        chat: row.chat.clone(),
+        message: row.id.clone(),
+        kind: wire::content_kind(&row.content),
+        mime: media.mime.clone(),
+        size,
+        path: path.display().to_string(),
+        file_name: wire::file_name_of(&row.content),
+    })
 }
 
 fn internal(error: impl std::fmt::Display) -> Failure {
@@ -328,6 +451,210 @@ mod tests {
             forwarded: false,
             thumbnail: None,
         }
+    }
+
+    /// Leaves the request parked when the answer has to wait for a download.
+    fn ask_later(
+        worker: &mut Worker,
+        method: &str,
+        arguments: serde_json::Value,
+    ) -> tokio::sync::oneshot::Receiver<Reply> {
+        let request = Request::from_call(method, arguments).expect("a request");
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        worker.handle_agent(Call { request, reply });
+        receiver
+    }
+
+    /// A photo message whose file is not on disk yet.
+    fn photo(id: &str) -> Message {
+        Message {
+            content: Content::Image {
+                caption: None,
+                media: crate::model::Media {
+                    mime: "image/jpeg".to_owned(),
+                    size: 4,
+                    width: Some(1),
+                    height: Some(1),
+                    path: None,
+                    state: Default::default(),
+                },
+            },
+            ..row(PEER, id, 100, "")
+        }
+    }
+
+    fn jpeg(dir: &std::path::Path) -> std::path::PathBuf {
+        let path = dir.join("photo.jpg");
+        std::fs::write(&path, [0xFF, 0xD8, 0xFF, 0xE0]).expect("written");
+        path
+    }
+
+    #[test]
+    fn a_message_with_no_file_is_refused_rather_than_fetched() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.archive.ensure_chat(PEER, "Ana").expect("a chat");
+        worker
+            .archive
+            .insert_message(&row(PEER, "T", 100, "just words"), None)
+            .expect("stored");
+        let failure = ask(
+            &mut worker,
+            "get_attachment",
+            serde_json::json!({ "chat": PEER, "message": "T" }),
+        )
+        .expect_err("a refusal");
+        assert_eq!(failure.code(), "invalid_request");
+        assert!(failure.message().contains("no attachment"), "{failure}");
+
+        let failure = ask(
+            &mut worker,
+            "get_attachment",
+            serde_json::json!({ "chat": PEER, "message": "NOPE" }),
+        )
+        .expect_err("a refusal");
+        assert_eq!(failure.code(), "not_found");
+    }
+
+    #[test]
+    fn a_file_already_on_disk_comes_back_at_once() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let dir = tempfile::tempdir().expect("a directory");
+        worker.archive.ensure_chat(PEER, "Ana").expect("a chat");
+        worker
+            .archive
+            .insert_message(&photo("IMG"), None)
+            .expect("stored");
+        let path = jpeg(dir.path());
+        worker
+            .archive
+            .set_media_path(PEER, "IMG", &path)
+            .expect("recorded");
+
+        let file = ask(
+            &mut worker,
+            "get_attachment",
+            serde_json::json!({ "chat": PEER, "message": "IMG" }),
+        )
+        .expect("the file");
+        assert_eq!(file["kind"], "image");
+        assert_eq!(file["mime"], "image/jpeg");
+        assert_eq!(file["size"], 4);
+        assert_eq!(file["path"], path.display().to_string());
+    }
+
+    /// The cache is safe to delete, so a recorded path is checked rather than
+    /// handed back. With no phone link there is nothing to fetch it from.
+    #[test]
+    fn a_deleted_cache_file_is_fetched_again_rather_than_trusted() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let dir = tempfile::tempdir().expect("a directory");
+        worker.archive.ensure_chat(PEER, "Ana").expect("a chat");
+        worker
+            .archive
+            .insert_message(&photo("IMG"), None)
+            .expect("stored");
+        worker
+            .archive
+            .set_media_path(PEER, "IMG", &dir.path().join("gone.jpg"))
+            .expect("recorded");
+
+        let failure = ask(
+            &mut worker,
+            "get_attachment",
+            serde_json::json!({ "chat": PEER, "message": "IMG" }),
+        )
+        .expect_err("a refusal");
+        assert_eq!(failure.code(), "offline");
+    }
+
+    /// Two requests for one file share one download, and both are answered
+    /// when it lands. Neither is answered before.
+    #[test]
+    fn a_second_request_joins_the_download_already_under_way() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let dir = tempfile::tempdir().expect("a directory");
+        worker.archive.ensure_chat(PEER, "Ana").expect("a chat");
+        worker
+            .archive
+            .insert_message(&photo("IMG"), None)
+            .expect("stored");
+        // An earlier request already started this download.
+        let (first, mut first_answer) = tokio::sync::oneshot::channel();
+        worker
+            .agent_downloads
+            .insert((PEER.to_owned(), "IMG".to_owned()), vec![first]);
+
+        let mut second_answer = ask_later(
+            &mut worker,
+            "get_attachment",
+            serde_json::json!({ "chat": PEER, "message": "IMG" }),
+        );
+        assert!(
+            second_answer.try_recv().is_err(),
+            "answered before the file arrived"
+        );
+
+        let path = jpeg(dir.path());
+        worker.finish_download(PEER.to_owned(), "IMG".to_owned(), Ok(path.clone()));
+        for answer in [&mut first_answer, &mut second_answer] {
+            let file = answer.try_recv().expect("an answer").expect("the file");
+            assert_eq!(file["path"], path.display().to_string());
+        }
+        assert!(worker.agent_downloads.is_empty());
+    }
+
+    #[test]
+    fn a_download_that_fails_says_why_to_everyone_waiting() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        worker.archive.ensure_chat(PEER, "Ana").expect("a chat");
+        worker
+            .archive
+            .insert_message(&photo("IMG"), None)
+            .expect("stored");
+        let (waiting, mut answer) = tokio::sync::oneshot::channel();
+        worker
+            .agent_downloads
+            .insert((PEER.to_owned(), "IMG".to_owned()), vec![waiting]);
+
+        worker.finish_download(
+            PEER.to_owned(),
+            "IMG".to_owned(),
+            Err("No longer available on WhatsApp's servers".to_owned()),
+        );
+        let failure = answer
+            .try_recv()
+            .expect("an answer")
+            .expect_err("a failure");
+        assert_eq!(failure.code(), "unavailable");
+        assert!(
+            failure.message().contains("No longer available"),
+            "{failure}"
+        );
+    }
+
+    /// Fetching a file changes nothing, so a read-only policy allows it.
+    #[test]
+    fn fetching_an_attachment_counts_as_reading() {
+        let (mut worker, _events, _inbox, _wa) = worker();
+        let dir = tempfile::tempdir().expect("a directory");
+        worker.archive.ensure_chat(PEER, "Ana").expect("a chat");
+        worker
+            .archive
+            .insert_message(&photo("IMG"), None)
+            .expect("stored");
+        let path = jpeg(dir.path());
+        worker
+            .archive
+            .set_media_path(PEER, "IMG", &path)
+            .expect("recorded");
+        worker.agent_policy = Policy::new(true, false, true);
+
+        ask(
+            &mut worker,
+            "get_attachment",
+            serde_json::json!({ "chat": PEER, "message": "IMG" }),
+        )
+        .expect("allowed while sending is off");
     }
 
     #[test]

@@ -219,6 +219,10 @@ protocol. These notes are for coding agents and new contributors.
   use, and it rejects unknown argument names rather than defaulting them.
   `agent::Policy` mirrors the user's settings into the worker, so the gate sits
   in one place whatever the transport; `agent::SendBudget` caps agent sends.
+  `get_attachment` is the one request that can answer later: the worker parks
+  its reply in `agent_downloads`, and every download, failed or not, ends in
+  `Worker::finish_download`, which answers it. Route a new download outcome
+  anywhere else and a parked agent waits until its time limit.
   `agent/http.rs` serves loopback HTTP on hyper, `agent/mcp.rs` speaks MCP over
   the same socket, `agent/token.rs` owns the bearer token, `agent/wire.rs` the
   response shapes. Those shapes are deliberately not `model::` types: an

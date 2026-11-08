@@ -62,6 +62,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 hyper = { version = "1", default-features = false, features = ["server", "http1"] }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 http-body-util = "0.1"
+# Sends a picture to an MCP client as an image it can look at. Already in the
+# tree through reqwest and the protocol library.
+base64 = "0.22"
 # SQLCipher encrypts the archive; the device store shares the same library.
 # Bundle OpenSSL so all release platforms use the same encryption provider.
 rusqlite = { version = "0.40", features = ["bundled-sqlcipher-vendored-openssl"] }

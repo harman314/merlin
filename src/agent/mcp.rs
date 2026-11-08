@@ -79,6 +79,12 @@ fn reads() -> serde_json::Value {
     serde_json::json!({ "readOnlyHint": true, "openWorldHint": false })
 }
 
+/// A tool that changes nothing but may fetch what it reads from WhatsApp's
+/// servers rather than from this computer.
+fn fetches() -> serde_json::Value {
+    serde_json::json!({ "readOnlyHint": true, "openWorldHint": true })
+}
+
 /// A tool that reaches WhatsApp. `destructive` marks one a client should
 /// confirm first, because other people see what it did.
 fn writes(destructive: bool) -> serde_json::Value {
@@ -103,6 +109,7 @@ fn facts(name: &str) -> (&'static str, serde_json::Value) {
         "get_messages" => ("Read messages", reads()),
         "search_messages" => ("Search messages", reads()),
         "list_contacts" => ("List contacts", reads()),
+        "get_attachment" => ("Get an attachment", fetches()),
         "send_text" => ("Send a message", writes(true)),
         "react" => ("React to a message", writes(false)),
         "mark_read" => ("Mark a chat read", writes(false)),
@@ -169,7 +176,8 @@ pub fn tools() -> Vec<serde_json::Value> {
             "get_messages",
             "Reads a page of messages from one conversation, oldest first. When \
              the answer carries next_before, pass it back as `before` to read \
-             further into the past.",
+             further into the past. A message with a photo, video, voice note \
+             or document carries an `attachment`; call get_attachment to see it.",
             object(
                 serde_json::json!({
                     "chat": chat_id(),
@@ -210,6 +218,22 @@ pub fn tools() -> Vec<serde_json::Value> {
                     "limit": limit(most),
                 }),
                 &[],
+            ),
+        ),
+        tool(
+            "get_attachment",
+            "Fetches the file behind a message's attachment: a photo, video, \
+             voice note, document or sticker. Use it when get_messages shows an \
+             `attachment` you need to look at. A photo comes back as an image \
+             you can see; other files come back as a path on this computer. A \
+             file not yet downloaded is fetched first, which can take a few \
+             seconds.",
+            object(
+                serde_json::json!({
+                    "chat": chat_id(),
+                    "message": { "type": "string", "description": "Message id from get_messages." },
+                }),
+                &["chat", "message"],
             ),
         ),
         tool(
@@ -345,16 +369,23 @@ pub async fn handle(service: &Service, body: &[u8]) -> Option<serde_json::Value>
 /// A tool that refuses is a result with `isError`, not a protocol error: the
 /// client shows the text to the model so it can choose what to do instead.
 async fn call_tool(service: &Service, call: ToolCall) -> serde_json::Value {
+    let attachment = call.name == "get_attachment";
     let answer = match Request::from_call(&call.name, call.arguments) {
         Ok(request) => service.ask(request).await,
         Err(failure) => Err(failure),
     };
     match answer {
-        Ok(value) => serde_json::json!({
-            "content": [{ "type": "text", "text": text_of(&value) }],
-            "structuredContent": value,
-            "isError": false,
-        }),
+        Ok(value) => {
+            let mut content = vec![serde_json::json!({ "type": "text", "text": text_of(&value) })];
+            if attachment && let Some(image) = inline_image(&value).await {
+                content.push(image);
+            }
+            serde_json::json!({
+                "content": content,
+                "structuredContent": value,
+                "isError": false,
+            })
+        }
         Err(failure) => serde_json::json!({
             "content": [{
                 "type": "text",
@@ -363,6 +394,27 @@ async fn call_tool(service: &Service, call: ToolCall) -> serde_json::Value {
             "isError": true,
         }),
     }
+}
+
+/// Largest picture sent inline. A bigger one comes back as its path alone.
+const INLINE_IMAGE_LIMIT: u64 = 5 * 1024 * 1024;
+
+/// Formats a model can look at. An HEIC or a TIFF stays a path.
+const INLINE_IMAGE_TYPES: [&str; 4] = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+
+/// The picture itself, for an attachment a model can look at.
+async fn inline_image(file: &serde_json::Value) -> Option<serde_json::Value> {
+    use base64::Engine;
+    let mime = file["mime"].as_str()?.split(';').next()?.trim();
+    if !INLINE_IMAGE_TYPES.contains(&mime) || file["size"].as_u64()? > INLINE_IMAGE_LIMIT {
+        return None;
+    }
+    let bytes = tokio::fs::read(file["path"].as_str()?).await.ok()?;
+    Some(serde_json::json!({
+        "type": "image",
+        "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+        "mimeType": mime,
+    }))
 }
 
 fn text_of(value: &serde_json::Value) -> String {
@@ -442,6 +494,7 @@ mod tests {
             "get_messages",
             "search_messages",
             "list_contacts",
+            "get_attachment",
             "send_text",
             "react",
             "mark_read",
@@ -603,14 +656,67 @@ mod tests {
                     .is_some_and(|title| !title.is_empty()),
                 "{name} has no display title, so `facts` has no entry for it"
             );
+            assert!(annotations["openWorldHint"].is_boolean(), "{name}");
             match annotations["readOnlyHint"].as_bool() {
-                Some(true) => assert_eq!(annotations["openWorldHint"], false, "{name}"),
+                Some(true) => {}
                 Some(false) => writing.push(name.to_owned()),
                 None => panic!("{name} declares no readOnlyHint"),
             }
         }
         writing.sort();
         assert_eq!(writing, ["mark_read", "react", "send_text"]);
+    }
+
+    /// Of the reading tools, only fetching an attachment leaves this computer.
+    #[test]
+    fn only_fetching_an_attachment_reads_beyond_this_computer() {
+        let open: Vec<String> = tools()
+            .iter()
+            .filter(|entry| entry["annotations"]["readOnlyHint"] == true)
+            .filter(|entry| entry["annotations"]["openWorldHint"] == true)
+            .map(|entry| entry["name"].as_str().expect("a name").to_owned())
+            .collect();
+        assert_eq!(open, ["get_attachment"]);
+    }
+
+    fn picture(dir: &std::path::Path, name: &str, bytes: &[u8], mime: &str) -> serde_json::Value {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).expect("written");
+        serde_json::json!({
+            "mime": mime,
+            "size": bytes.len(),
+            "path": path.display().to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn a_photo_comes_back_as_an_image_a_model_can_see() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let file = picture(dir.path(), "a.jpg", &[0xFF, 0xD8, 0xFF, 0xE0], "image/jpeg");
+        let image = inline_image(&file).await.expect("an image");
+        assert_eq!(image["type"], "image");
+        assert_eq!(image["mimeType"], "image/jpeg");
+        assert_eq!(image["data"], "/9j/4A==");
+    }
+
+    #[tokio::test]
+    async fn only_formats_a_model_reads_and_sizes_it_accepts_go_inline() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let heic = picture(dir.path(), "a.heic", b"x", "image/heic");
+        assert!(inline_image(&heic).await.is_none());
+        let video = picture(dir.path(), "a.mp4", b"x", "video/mp4");
+        assert!(inline_image(&video).await.is_none());
+
+        let mut huge = picture(dir.path(), "b.jpg", b"x", "image/jpeg");
+        huge["size"] = serde_json::json!(INLINE_IMAGE_LIMIT + 1);
+        assert!(inline_image(&huge).await.is_none());
+
+        // A parameter after the type does not hide a readable picture.
+        let tagged = picture(dir.path(), "c.png", b"x", "image/png; charset=binary");
+        assert_eq!(
+            inline_image(&tagged).await.expect("an image")["mimeType"],
+            "image/png"
+        );
     }
 
     /// Only a sent message cannot be taken back.

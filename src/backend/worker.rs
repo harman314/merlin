@@ -268,6 +268,7 @@ pub async fn run(
         poll_sending: HashSet::new(),
         agent_policy,
         agent_budget: Default::default(),
+        agent_downloads: HashMap::new(),
     };
     worker.load_state();
     worker.backfill();
@@ -314,6 +315,10 @@ struct Worker {
     agent_policy: Arc<crate::agent::Policy>,
     /// Rolling cap on agent-initiated sends.
     agent_budget: crate::agent::SendBudget,
+    /// Agent requests parked until an attachment download finishes, by chat
+    /// and message. Several requests for one file share one download.
+    agent_downloads:
+        HashMap<(ChatId, String), Vec<tokio::sync::oneshot::Sender<crate::agent::Reply>>>,
     read_sync: ReadSync,
     poll_decrypting: usize,
     poll_history: poll_history::Requests,
@@ -3075,20 +3080,7 @@ impl Worker {
                     self.emit(Event::Error(format!("Message not sent: {error}")));
                 }
             }
-            Command::Downloaded { chat, id, result } => {
-                if let Ok(path) = &result {
-                    let _ = self.archive.set_media_path(&chat, &id, path);
-                }
-                let for_picker = self.sticker_downloads.remove(&(chat.clone(), id.clone()));
-                self.emit(Event::Media {
-                    chat,
-                    message: id,
-                    result,
-                });
-                if for_picker {
-                    self.emit_stickers();
-                }
-            }
+            Command::Downloaded { chat, id, result } => self.finish_download(chat, id, result),
             Command::AvatarFetched { id, full, path } => {
                 self.emit(Event::Avatar { id, full, path })
             }
@@ -3440,22 +3432,36 @@ impl Worker {
         }
     }
 
+    /// Every download ends here, whether it failed before starting or came
+    /// back from the network, so nothing waiting on one is left hanging.
+    fn finish_download(&mut self, chat: ChatId, id: String, result: Result<PathBuf, String>) {
+        if let Ok(path) = &result {
+            let _ = self.archive.set_media_path(&chat, &id, path);
+        }
+        self.resolve_agent_downloads(&chat, &id, &result);
+        let for_picker = self.sticker_downloads.remove(&(chat.clone(), id.clone()));
+        self.emit(Event::Media {
+            chat,
+            message: id,
+            result,
+        });
+        if for_picker {
+            self.emit_stickers();
+        }
+    }
+
     fn download(&mut self, chat: ChatId, id: String) {
         let Some(client) = self.client.clone() else {
-            self.emit(Event::Media {
-                chat,
-                message: id,
-                result: Err("Not connected to WhatsApp".to_owned()),
-            });
+            self.finish_download(chat, id, Err("Not connected to WhatsApp".to_owned()));
             return;
         };
         let raw = self.archive.raw(&chat, &id).ok().flatten();
         let Some(message) = raw.and_then(|raw| wa::Message::decode_from_slice(&raw).ok()) else {
-            self.emit(Event::Media {
+            self.finish_download(
                 chat,
-                message: id,
-                result: Err("Attachment download keys are missing".to_owned()),
-            });
+                id,
+                Err("Attachment download keys are missing".to_owned()),
+            );
             return;
         };
         let base = message.get_base_message().clone();
@@ -3495,11 +3501,11 @@ impl Worker {
                     None,
                 )
             } else {
-                self.emit(Event::Media {
+                self.finish_download(
                     chat,
-                    message: id,
-                    result: Err("This message has no downloadable file".to_owned()),
-                });
+                    id,
+                    Err("This message has no downloadable file".to_owned()),
+                );
                 return;
             };
         // Keep metadata needed for one media re-upload request and retry.
@@ -6045,6 +6051,7 @@ mod receipt_tests {
             poll_history: Default::default(),
             agent_policy: crate::agent::Policy::new(true, true, true),
             agent_budget: Default::default(),
+            agent_downloads: HashMap::new(),
             poll_sending: HashSet::new(),
         };
         (worker, events_rx, inbox, wa_events)

@@ -311,7 +311,7 @@ Code. Merlin listens on `127.0.0.1` only, and every request needs the token.
 | Header | `Authorization: Bearer <token>` |
 
 Tools: `status`, `list_chats`, `get_chat`, `get_messages`, `search_messages`,
-`list_contacts`, `send_text`, `react`, `mark_read`.
+`list_contacts`, `get_attachment`, `send_text`, `react`, `mark_read`.
 
 ```sh
 curl -s -H "Authorization: Bearer $(cat ~/.config/merlin/agent-token)" \
@@ -326,6 +326,9 @@ What it will and will not do:
 - Sends go only to conversations you already have, and are capped at 20 a
   minute. Announcement groups are refused.
 - `mark_read` follows your own read-receipt setting.
+- `get_attachment` downloads a file that is not on this computer yet, the same
+  way clicking it in the window does. Over MCP a photo comes back as an image
+  the model can look at; other files come back as a local path.
 - Turning the API on takes effect when Merlin next starts. Turning it off, or
   turning sending off, stops answers at once.
 - Nothing is served to a browser: no cross-origin headers are sent, and a
