@@ -1770,6 +1770,43 @@ pub fn edge_scroll(pointer: f32, top: f32, bottom: f32) -> f32 {
     }
 }
 
+/// A name a person would recognise for a saved or copied attachment.
+///
+/// A document keeps the name its sender gave it. Anything else is named for
+/// what it is and when it arrived, the way the phone names its exports,
+/// because the cache names files by chat and message id.
+fn suggested_name(message: &Message, path: &std::path::Path) -> String {
+    let kind = match &message.content {
+        Content::Document { file_name, .. } => {
+            return crate::util::safe_file_name(file_name, "Document");
+        }
+        Content::Image { .. } => "Photo",
+        Content::Video { gif: true, .. } => "GIF",
+        Content::Video { .. } => "Video",
+        Content::Audio {
+            voice_note: true, ..
+        } => "Voice message",
+        Content::Audio { .. } => "Audio",
+        Content::Sticker { .. } => "Sticker",
+        _ => "File",
+    };
+    let when = jiff::Timestamp::from_second(message.timestamp)
+        .map(|stamp| {
+            stamp
+                .to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%Y-%m-%d at %H.%M.%S")
+                .to_string()
+        })
+        .unwrap_or_default();
+    let stem = format!("{kind} {when}");
+    let stem = stem.trim();
+    let name = match path.extension().and_then(|extension| extension.to_str()) {
+        Some(extension) => format!("{stem}.{extension}"),
+        None => stem.to_owned(),
+    };
+    crate::util::safe_file_name(&name, kind)
+}
+
 /// Starts a reply when the response was double-clicked, as the menu's "Reply".
 fn reply_on_double_click(response: &egui::Response, message: &Message, actions: &mut Vec<Action>) {
     if response.double_clicked() && !matches!(message.content, Content::Revoked) {
@@ -2384,6 +2421,18 @@ fn context_menu(ui: &mut egui::Ui, view: &View<'_>, message: &Message, actions: 
                     && widgets::menu_item(ui, &palette, Some(Icon::FileText), "Show in folder")
                 {
                     actions.push(Action::OpenFile(folder.to_path_buf()));
+                }
+                if widgets::menu_item(ui, &palette, Some(Icon::Copy), "Copy file") {
+                    actions.push(Action::CopyFile {
+                        path: path.clone(),
+                        name: suggested_name(message, path),
+                    });
+                }
+                if widgets::menu_item(ui, &palette, Some(Icon::Download), "Save file…") {
+                    actions.push(Action::SaveFile {
+                        path: path.clone(),
+                        name: suggested_name(message, path),
+                    });
                 }
             }
             None => {
@@ -3750,6 +3799,75 @@ fn chat_of(chat: &ChatId) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn arrived(content: Content) -> Message {
+        Message {
+            id: "3EB0".into(),
+            chat: "1@s.whatsapp.net".into(),
+            sender: "1@s.whatsapp.net".into(),
+            sender_name: None,
+            from_me: false,
+            timestamp: 1_700_000_000,
+            content,
+            status: Delivery::None,
+            delivered_at: None,
+            read_at: None,
+            quoted: None,
+            reactions: Vec::new(),
+            edited: false,
+            mentions: Vec::new(),
+            forwarded: false,
+            thumbnail: None,
+        }
+    }
+
+    /// The cache names files by chat and message id. Neither should reach a
+    /// save dialog or a paste.
+    #[test]
+    fn a_saved_attachment_gets_a_name_a_person_recognises() {
+        let cached = std::path::Path::new("/cache/1_s_whatsapp_net-3EB0.jpg");
+        let photo = suggested_name(
+            &arrived(Content::Image {
+                caption: None,
+                media: media(None, None),
+            }),
+            cached,
+        );
+        assert!(photo.starts_with("Photo 20"), "{photo}");
+        assert!(photo.ends_with(".jpg"), "{photo}");
+        assert!(!photo.contains("whatsapp_net"), "{photo}");
+
+        let voice = suggested_name(
+            &arrived(Content::Audio {
+                media: media(None, None),
+                seconds: Some(3),
+                voice_note: true,
+                waveform: Vec::new(),
+            }),
+            std::path::Path::new("/cache/x.ogg"),
+        );
+        assert!(voice.starts_with("Voice message "), "{voice}");
+        assert!(voice.ends_with(".ogg"), "{voice}");
+    }
+
+    #[test]
+    fn a_document_keeps_the_name_its_sender_gave_it_made_safe() {
+        let document = |file_name: &str| {
+            arrived(Content::Document {
+                media: media(None, None),
+                file_name: file_name.into(),
+                caption: None,
+                pages: None,
+            })
+        };
+        let cached = std::path::Path::new("/cache/1_s_whatsapp_net-3EB0.pdf");
+        assert_eq!(suggested_name(&document("Lease.pdf"), cached), "Lease.pdf");
+        assert_eq!(
+            suggested_name(&document("../../Lease.pdf"), cached),
+            "Lease.pdf"
+        );
+        assert_eq!(suggested_name(&document(""), cached), "Document");
+    }
 
     fn media(w: Option<u32>, h: Option<u32>) -> Media {
         Media {

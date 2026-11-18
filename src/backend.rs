@@ -219,6 +219,11 @@ pub enum Command {
     },
     /// Selects and sends files with the desktop picker.
     PickFiles(ChatId),
+    /// Asks where to save a file, suggesting `name`, and copies it there.
+    SaveFile {
+        from: PathBuf,
+        name: String,
+    },
     /// Sends files with the caption on the first.
     SendFiles {
         chat: ChatId,
@@ -529,6 +534,8 @@ pub enum Event {
     },
     UpdateDownloaded(Result<Box<crate::updates::install::Prepared>, String>),
     UpdateInstalling(Result<(), String>),
+    /// A short confirmation for the user, such as a file saved.
+    Notice(String),
     Error(String),
 }
 

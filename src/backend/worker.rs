@@ -37,6 +37,7 @@ use whatsapp_rust::{MediaRetryResult, MediaReuploadRequest};
 use whatsapp_rust::{MessageId, ProfilePictureRequest, ProfilePictureTarget, ProfilePictureType};
 
 mod agent;
+mod interactive;
 mod poll_history;
 mod polls;
 
@@ -617,7 +618,8 @@ impl Worker {
     }
 
     fn backfill(&mut self) {
-        const VERSION: &str = "2";
+        // 3: business messages carry readable text instead of "unsupported".
+        const VERSION: &str = "3";
         if self.archive.meta("derived").ok().flatten().as_deref() == Some(VERSION) {
             return;
         }
@@ -2664,6 +2666,31 @@ impl Worker {
                 });
             }
             Command::Picked { chat, paths } => self.emit(Event::Picked { chat, paths }),
+            Command::SaveFile { from, name } => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let Some(to) = rfd::FileDialog::new()
+                        .set_title("Save file")
+                        .set_file_name(&name)
+                        .save_file()
+                    else {
+                        // Cancelled.
+                        return;
+                    };
+                    let event = match std::fs::copy(&from, &to) {
+                        Ok(_) => Event::Notice(format!(
+                            "Saved {}",
+                            to.file_name()
+                                .map(|name| name.to_string_lossy().into_owned())
+                                .unwrap_or(name)
+                        )),
+                        Err(error) => Event::Error(format!("Could not save the file: {error}")),
+                    };
+                    let _ = events.send(event);
+                    waker.wake();
+                });
+            }
             Command::SendFiles {
                 chat,
                 paths,
@@ -3249,6 +3276,7 @@ impl Worker {
             ));
             return;
         };
+        let original = forwardable(original, &source.content);
         // whatsapp-rust owns the forwarding rules: unwrap transient wrappers,
         // strip quote chains and secrets, and retain reusable media metadata.
         let (message, expiration) =
@@ -4627,6 +4655,18 @@ fn non_empty(text: &Option<String>) -> Option<String> {
 }
 
 /// Builds a text body with optional quote and mention context.
+/// What goes out when a message is forwarded. A business message's buttons
+/// cannot be re-sent from a personal account, so it travels as the text the
+/// window shows for it, which recipients see with the same markup.
+fn forwardable(original: wa::Message, shown: &Content) -> wa::Message {
+    match shown {
+        Content::Text { text, .. } if interactive::is_business(original.get_base_message()) => {
+            outgoing_text(text.clone(), None, &[])
+        }
+        _ => original,
+    }
+}
+
 fn outgoing_text(
     text: String,
     mut context: Option<wa::ContextInfo>,
@@ -4887,16 +4927,11 @@ fn classify(base: &wa::Message) -> Option<Content> {
     if base.sticker_pack_message.is_set() {
         return unsupported("sticker pack");
     }
-    if base.interactive_message.is_set()
-        || base.buttons_message.is_set()
-        || base.list_message.is_set()
-        || base.template_message.is_set()
-        || base.buttons_response_message.is_set()
-        || base.list_response_message.is_set()
-        || base.interactive_response_message.is_set()
-        || base.template_button_reply_message.is_set()
-    {
-        return unsupported("interactive message");
+    if interactive::is_business(base) {
+        return match interactive::text(base) {
+            Some(text) => Some(Content::text(text)),
+            None => unsupported("interactive message"),
+        };
     }
     if base.product_message.is_set() || base.order_message.is_set() {
         return unsupported("product");

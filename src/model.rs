@@ -620,6 +620,17 @@ pub enum Action {
     CancelRecording,
     SendRecording,
     OpenFile(PathBuf),
+    /// Puts a downloaded attachment on the clipboard as a file, under `name`,
+    /// so it pastes into a file manager or another app.
+    CopyFile {
+        path: PathBuf,
+        name: String,
+    },
+    /// Asks where to save a downloaded attachment, suggesting `name`.
+    SaveFile {
+        path: PathBuf,
+        name: String,
+    },
     /// Opens a file in the system's own preview panel.
     QuickLook(PathBuf),
     /// Opens an attachment in the in-app viewer.

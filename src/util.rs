@@ -323,6 +323,35 @@ pub fn tray_template_rgba(size: usize) -> Vec<u8> {
     rgba
 }
 
+/// A name that is safe as one file in one folder.
+///
+/// Document names come from the sender, so one can carry `../` or a path
+/// separator from another platform. Only the last component survives, with
+/// separators and control characters replaced, and an empty result falls
+/// back to `fallback`.
+pub fn safe_file_name(name: &str, fallback: &str) -> String {
+    let last = name
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .chars()
+        // Windows refuses these in a file name, and macOS shows ':' as '/'.
+        .map(|c| {
+            if c.is_control() || matches!(c, ':' | '<' | '>' | '"' | '|' | '?' | '*') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect::<String>();
+    let trimmed = last.trim().trim_start_matches('.').trim();
+    if trimmed.is_empty() {
+        fallback.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
 /// Builds one of the generated protobuf types, which are non-exhaustive and so
 /// reject a struct literal. Assignment through a closure keeps a test fixture
 /// readable where a literal used to sit.
@@ -335,6 +364,32 @@ pub fn proto<T: Default>(fill: impl FnOnce(&mut T)) -> T {
 
 #[cfg(test)]
 mod tests {
+    use super::safe_file_name;
+
+    /// A document name comes from the sender. It must never reach outside the
+    /// folder it is written to.
+    #[test]
+    fn a_file_name_cannot_climb_out_of_its_folder() {
+        assert_eq!(safe_file_name("../../etc/passwd", "f"), "passwd");
+        assert_eq!(safe_file_name(r"C:\Users\x\a.pdf", "f"), "a.pdf");
+        assert_eq!(safe_file_name("..", "f"), "f");
+        assert_eq!(safe_file_name("folder/", "f"), "f");
+        assert_eq!(safe_file_name("   ", "f"), "f");
+    }
+
+    #[test]
+    fn a_file_name_keeps_what_every_platform_accepts() {
+        assert_eq!(
+            safe_file_name("Invoice March.pdf", "f"),
+            "Invoice March.pdf"
+        );
+        assert_eq!(safe_file_name("a:b?c*.pdf", "f"), "a_b_c_.pdf");
+        assert_eq!(safe_file_name("tab\there.txt", "f"), "tab_here.txt");
+        // A leading dot would hide the file in a file manager.
+        assert_eq!(safe_file_name(".secret", "f"), "secret");
+        assert_eq!(safe_file_name("猫の写真.jpg", "f"), "猫の写真.jpg");
+    }
+
     #[test]
     fn image_paths_keep_the_native_path_after_loader_conversion() {
         for path in [

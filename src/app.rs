@@ -4,7 +4,7 @@
 //! and processes backend events.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::audio::{Player, Recorder};
@@ -1263,6 +1263,7 @@ impl App {
                         self.update_download = crate::updates::DownloadState::Failed(error)
                     }
                 },
+                Event::Notice(message) => self.toast(message),
                 Event::Error(message) => {
                     self.sticker_import_pending = false;
                     self.new_contact_pending = false;
@@ -2098,6 +2099,17 @@ impl App {
                 if let Err(error) = open::that_detached(&path) {
                     self.toast_error(format!("Could not open {}: {error}", path.display()));
                 }
+            }
+            Action::CopyFile { path, name } => {
+                match stage_for_clipboard(&self.dirs, &path, &name)
+                    .and_then(|staged| put_clipboard_files(&[staged]))
+                {
+                    Ok(()) => self.toast("Copied"),
+                    Err(error) => self.toast_error(format!("Could not copy the file: {error}")),
+                }
+            }
+            Action::SaveFile { path, name } => {
+                self.backend.send(Command::SaveFile { from: path, name });
             }
             Action::QuickLook(path) => {
                 // Falls back to the desktop handler where there is no panel.
@@ -3169,6 +3181,53 @@ mod stub {
 #[cfg(test)]
 pub(crate) use stub::hold as hold_clipboard;
 
+/// A copy of `path` named `name`, for the clipboard.
+///
+/// The cache names files by chat and message id, which is what a paste into a
+/// file manager would otherwise produce. A hard link costs no space; a copy is
+/// the fallback where the folder sits on another volume. Only the latest copy
+/// is kept.
+fn stage_for_clipboard(dirs: &AppDirs, path: &Path, name: &str) -> Result<PathBuf, String> {
+    let folder = dirs.cache.join("clipboard");
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
+    let staged = folder.join(crate::util::safe_file_name(name, "file"));
+    if std::fs::hard_link(path, &staged).is_err() {
+        std::fs::copy(path, &staged).map_err(|error| error.to_string())?;
+    }
+    Ok(staged)
+}
+
+/// Puts files on the clipboard, so they paste into a file manager or another
+/// app as files rather than as text.
+fn put_clipboard_files(paths: &[PathBuf]) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        stub::hold(paths.to_vec(), None);
+        Ok(())
+    }
+    #[cfg(not(test))]
+    {
+        // On Linux this process serves the clipboard, so the handle that set
+        // it stays alive for the life of the window's thread.
+        thread_local! {
+            static HELD: std::cell::RefCell<Option<arboard::Clipboard>> =
+                const { std::cell::RefCell::new(None) };
+        }
+        HELD.with(|held| {
+            let mut held = held.borrow_mut();
+            if held.is_none() {
+                *held = Some(arboard::Clipboard::new().map_err(|error| error.to_string())?);
+            }
+            held.as_mut()
+                .ok_or_else(|| "no clipboard".to_owned())?
+                .set()
+                .file_list(paths)
+                .map_err(|error| error.to_string())
+        })
+    }
+}
+
 /// File paths on the clipboard, empty when it holds none.
 fn clipboard_files() -> Vec<PathBuf> {
     #[cfg(test)]
@@ -3411,6 +3470,115 @@ mod tests {
         let mut output = ctx.run_ui(input, |ui| app.background_frame(ui.ctx()));
         output.textures_delta.clear();
         assert_eq!(app.chat(&chat.id).unwrap().unread, 1);
+    }
+
+    /// Copy file puts a readable name on the clipboard, not the cache's name,
+    /// and the bytes behind it are the attachment's.
+    #[test]
+    fn copying_a_file_puts_a_readable_copy_on_the_clipboard() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        let ctx = egui::Context::default();
+        let cached = directory.path().join("1_s_whatsapp_net-3EB0.pdf");
+        std::fs::write(&cached, b"%PDF-1.4 lease").unwrap();
+
+        app.apply(
+            Action::CopyFile {
+                path: cached.clone(),
+                name: "Lease.pdf".into(),
+            },
+            &ctx,
+        );
+        let held = clipboard_files();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].file_name().unwrap(), "Lease.pdf");
+        assert_eq!(std::fs::read(&held[0]).unwrap(), b"%PDF-1.4 lease");
+        assert_eq!(app.toasts.last().unwrap().message, "Copied");
+
+        // A second copy replaces the first rather than piling up beside it.
+        app.apply(
+            Action::CopyFile {
+                path: cached,
+                name: "Other.pdf".into(),
+            },
+            &ctx,
+        );
+        assert!(!held[0].exists());
+        assert_eq!(clipboard_files()[0].file_name().unwrap(), "Other.pdf");
+    }
+
+    /// A name from the sender cannot place the copy outside its folder.
+    #[test]
+    fn a_hostile_name_stays_inside_the_clipboard_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let dirs = AppDirs::under(directory.path());
+        let cached = directory.path().join("cached.bin");
+        std::fs::write(&cached, b"x").unwrap();
+        let staged = stage_for_clipboard(&dirs, &cached, "../../escape.sh").unwrap();
+        assert_eq!(staged.parent().unwrap(), dirs.cache.join("clipboard"));
+        assert_eq!(staged.file_name().unwrap(), "escape.sh");
+    }
+
+    #[test]
+    fn copying_a_file_that_is_gone_says_so() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        app.apply(
+            Action::CopyFile {
+                path: directory.path().join("missing.jpg"),
+                name: "Photo.jpg".into(),
+            },
+            &egui::Context::default(),
+        );
+        let toast = app.toasts.last().unwrap();
+        assert!(
+            toast.message.starts_with("Could not copy the file"),
+            "{}",
+            toast.message
+        );
+    }
+
+    /// The dialog blocks, so the window hands it to the worker rather than
+    /// opening it on the frame.
+    #[test]
+    fn saving_a_file_asks_the_worker_with_the_suggested_name() {
+        let mut app = app();
+        let (backend, mut commands) = Backend::recording();
+        app.backend = backend;
+        app.apply(
+            Action::SaveFile {
+                path: PathBuf::from("/cache/a.jpg"),
+                name: "Photo 2026-11-18 at 10.32.15.jpg".into(),
+            },
+            &egui::Context::default(),
+        );
+        match commands.try_recv().unwrap() {
+            Command::SaveFile { from, name } => {
+                assert_eq!(from, PathBuf::from("/cache/a.jpg"));
+                assert_eq!(name, "Photo 2026-11-18 at 10.32.15.jpg");
+            }
+            other => panic!("expected SaveFile, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_saved_file_is_confirmed_without_reaching_the_log_as_an_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        events
+            .send(Event::Notice("Saved Lease.pdf".into()))
+            .unwrap();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.background_frame(ui.ctx())
+        });
+        output.textures_delta.clear();
+        let toast = app.toasts.last().unwrap();
+        assert_eq!(toast.message, "Saved Lease.pdf");
+        assert!(matches!(toast.kind, ToastKind::Info));
     }
 
     #[test]
