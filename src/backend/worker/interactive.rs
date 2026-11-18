@@ -8,7 +8,7 @@
 //! window already draws, links and all. The buttons are listed, not offered:
 //! tapping one answers the business, and that is not built here.
 
-use whatsapp_rust::prelude::wa;
+use whatsapp_rust::prelude::{MessageField, wa};
 
 use wa::__buffa::oneof::hydrated_template_button::HydratedButton;
 use wa::__buffa::oneof::message::buttons_message::Header as ButtonsHeader;
@@ -30,15 +30,95 @@ pub(super) fn is_business(base: &wa::Message) -> bool {
         || base.template_button_reply_message.is_set()
 }
 
+/// Whether a photo, video or document in the header is noted in the text or
+/// shown as the message itself.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Header {
+    Noted,
+    Shown,
+}
+
 /// Readable text for a business message. `None` when it is not one, or when
 /// it carries nothing a person could read, such as a bare storefront link.
 pub(super) fn text(base: &wa::Message) -> Option<String> {
+    compose(base, Header::Noted)
+}
+
+/// The text for a business message whose header media is shown as the
+/// message itself, so it does not also name that media.
+pub(super) fn caption(base: &wa::Message) -> Option<String> {
+    compose(base, Header::Shown)
+}
+
+/// A plain message holding the photo, video or document a business message
+/// carries in its header, so it is shown, previewed and downloaded the way
+/// any other is. The header carries the same download keys as an ordinary
+/// attachment. `None` when there is none, and for a carousel, whose cards
+/// each carry their own.
+pub(super) fn media_carrier(base: &wa::Message) -> Option<wa::Message> {
+    enum Found<'a> {
+        Image(&'a wa::message::ImageMessage),
+        Video(&'a wa::message::VideoMessage),
+        Document(&'a wa::message::DocumentMessage),
+    }
+    fn from_card(card: &wa::message::InteractiveMessage) -> Option<Found<'_>> {
+        match card.header.as_option()?.media.as_ref()? {
+            Media::ImageMessage(image) => Some(Found::Image(image)),
+            Media::VideoMessage(video) => Some(Found::Video(video)),
+            Media::DocumentMessage(document) => Some(Found::Document(document)),
+            _ => None,
+        }
+    }
+    fn from_title(title: &Option<Title>) -> Option<Found<'_>> {
+        match title.as_ref()? {
+            Title::ImageMessage(image) => Some(Found::Image(image)),
+            Title::VideoMessage(video) => Some(Found::Video(video)),
+            Title::DocumentMessage(document) => Some(Found::Document(document)),
+            _ => None,
+        }
+    }
+    let found = if let Some(card) = base.interactive_message.as_option() {
+        match card.interactive_message {
+            Some(Kind::CarouselMessage(_)) => None,
+            _ => from_card(card),
+        }
+    } else if let Some(template) = base.template_message.as_option() {
+        match &template.format {
+            Some(Format::InteractiveMessageTemplate(card)) => from_card(card),
+            Some(Format::HydratedFourRowTemplate(hydrated)) => from_title(&hydrated.title),
+            _ => template
+                .hydrated_template
+                .as_option()
+                .and_then(|hydrated| from_title(&hydrated.title)),
+        }
+    } else if let Some(buttons) = base.buttons_message.as_option() {
+        match buttons.header.as_ref() {
+            Some(ButtonsHeader::ImageMessage(image)) => Some(Found::Image(image)),
+            Some(ButtonsHeader::VideoMessage(video)) => Some(Found::Video(video)),
+            Some(ButtonsHeader::DocumentMessage(document)) => Some(Found::Document(document)),
+            _ => None,
+        }
+    } else {
+        None
+    }?;
+    let mut carrier = wa::Message::default();
+    match found {
+        Found::Image(image) => carrier.image_message = MessageField::some(image.clone()),
+        Found::Video(video) => carrier.video_message = MessageField::some(video.clone()),
+        Found::Document(document) => {
+            carrier.document_message = MessageField::some(document.clone());
+        }
+    }
+    Some(carrier)
+}
+
+fn compose(base: &wa::Message, header: Header) -> Option<String> {
     let rendered = if let Some(message) = base.interactive_message.as_option() {
-        interactive(message)
+        interactive(message, header)
     } else if let Some(message) = base.template_message.as_option() {
-        template(message)
+        template(message, header)
     } else if let Some(message) = base.buttons_message.as_option() {
-        buttons(message)
+        buttons(message, header)
     } else if let Some(message) = base.list_message.as_option() {
         list(message)
     } else if let Some(reply) = base.buttons_response_message.as_option() {
@@ -85,9 +165,10 @@ struct Card {
 
 impl Card {
     /// WhatsApp markup: a bold title, the body as sent, an italic footer, one
-    /// line per button, and a note of any header media last. The chat list
-    /// previews the first line, which should be the title or the body.
-    fn render(&self) -> Option<String> {
+    /// line per button, and a note of any header media last unless it is shown.
+    /// The chat list previews the first line, which should be the title or the
+    /// body.
+    fn render(&self, header: Header) -> Option<String> {
         let head = join_lines([
             self.title.as_ref().map(|title| format!("*{title}*")),
             self.subtitle.clone(),
@@ -108,7 +189,9 @@ impl Card {
             self.body.clone(),
             self.footer.as_ref().map(|footer| format!("_{footer}_")),
             buttons,
-            self.media.map(|media| format!("[{media}]")),
+            self.media
+                .filter(|_| header == Header::Noted)
+                .map(|media| format!("[{media}]")),
         ]
         .into_iter()
         .flatten()
@@ -117,7 +200,7 @@ impl Card {
     }
 }
 
-fn interactive(message: &wa::message::InteractiveMessage) -> Option<String> {
+fn interactive(message: &wa::message::InteractiveMessage, header: Header) -> Option<String> {
     let mut card = Card::default();
     if let Some(header) = message.header.as_option() {
         card.title = clean_opt(&header.title);
@@ -143,20 +226,27 @@ fn interactive(message: &wa::message::InteractiveMessage) -> Option<String> {
                 })
                 .collect();
         }
-        // A carousel is a row of cards that each read like a message.
+        // A carousel is a row of cards that each read like a message. Their
+        // pictures are not shown, so each card notes its own.
         Some(Kind::CarouselMessage(carousel)) => {
-            cards = carousel.cards.iter().filter_map(interactive).collect();
+            cards = carousel
+                .cards
+                .iter()
+                .filter_map(|card| interactive(card, Header::Noted))
+                .collect();
         }
         _ => {}
     }
-    let blocks: Vec<String> = card.render().into_iter().chain(cards).collect();
+    let blocks: Vec<String> = card.render(header).into_iter().chain(cards).collect();
     (!blocks.is_empty()).then(|| blocks.join("\n\n———\n\n"))
 }
 
-fn template(message: &wa::message::TemplateMessage) -> Option<String> {
+fn template(message: &wa::message::TemplateMessage, header: Header) -> Option<String> {
     match &message.format {
-        Some(Format::InteractiveMessageTemplate(inner)) => return interactive(inner),
-        Some(Format::HydratedFourRowTemplate(hydrated)) => return hydrated_template(hydrated),
+        Some(Format::InteractiveMessageTemplate(inner)) => return interactive(inner, header),
+        Some(Format::HydratedFourRowTemplate(hydrated)) => {
+            return hydrated_template(hydrated, header);
+        }
         _ => {}
     }
     // The unhydrated form needs the business's localized strings, which do
@@ -164,11 +254,12 @@ fn template(message: &wa::message::TemplateMessage) -> Option<String> {
     message
         .hydrated_template
         .as_option()
-        .and_then(hydrated_template)
+        .and_then(|hydrated| hydrated_template(hydrated, header))
 }
 
 fn hydrated_template(
     template: &wa::message::template_message::HydratedFourRowTemplate,
+    header: Header,
 ) -> Option<String> {
     let mut card = Card {
         body: clean_opt(&template.hydrated_content_text),
@@ -198,10 +289,10 @@ fn hydrated_template(
         })
         .map(Line::Button)
         .collect();
-    card.render()
+    card.render(header)
 }
 
-fn buttons(message: &wa::message::ButtonsMessage) -> Option<String> {
+fn buttons(message: &wa::message::ButtonsMessage, header: Header) -> Option<String> {
     let mut card = Card {
         body: clean_opt(&message.content_text),
         footer: clean_opt(&message.footer_text),
@@ -232,7 +323,7 @@ fn buttons(message: &wa::message::ButtonsMessage) -> Option<String> {
             }
         })
         .collect();
-    card.render()
+    card.render(header)
 }
 
 fn list(message: &wa::message::ListMessage) -> Option<String> {
@@ -259,7 +350,7 @@ fn list(message: &wa::message::ListMessage) -> Option<String> {
         card.buttons
             .extend(clean_opt(&message.button_text).map(Line::Button));
     }
-    card.render()
+    card.render(Header::Noted)
 }
 
 /// Lines for one native-flow button. Its label and what it points at live in a
@@ -435,6 +526,130 @@ mod tests {
             Some("Your table is booked for 8pm.")
         );
         assert!(rendered.ends_with("[Photo]"), "{rendered}");
+    }
+
+    fn photo() -> wa::message::ImageMessage {
+        proto(|image: &mut wa::message::ImageMessage| {
+            image.mimetype = Some("image/jpeg".to_owned());
+            image.file_length = Some(48_000);
+            image.width = Some(800);
+            image.height = Some(600);
+            image.jpeg_thumbnail = Some(vec![0xFF, 0xD8, 0x01]);
+            image.direct_path = Some("/v/t62/abc".to_owned());
+            image.media_key = Some(vec![7; 32]);
+        })
+    }
+
+    fn with_photo_header(card: &mut wa::message::InteractiveMessage) {
+        let header = card.header.get_or_insert_default();
+        header.media = Some(Media::ImageMessage(Box::new(photo())));
+    }
+
+    /// The header holds a whole photo with its download keys, so it becomes
+    /// the message, captioned with the business's words, and is downloaded
+    /// like any other photo.
+    #[test]
+    fn a_header_photo_becomes_the_message_with_the_words_as_its_caption() {
+        use crate::model::Content;
+        let mut card = interactive_card(Some("Sale"), "Half price today", None, Vec::new());
+        with_photo_header(&mut card);
+        let message = holding(card);
+
+        let carrier = media_carrier(&message).expect("a photo to carry");
+        assert_eq!(carrier.image_message.as_option(), Some(&photo()));
+        assert!(!carrier.interactive_message.is_set());
+
+        match super::super::classify(&message) {
+            Some(Content::Image { caption, media }) => {
+                assert_eq!(caption.as_deref(), Some("*Sale*\n\nHalf price today"));
+                assert_eq!(media.mime, "image/jpeg");
+            }
+            other => panic!("expected a photo, got {other:?}"),
+        }
+        // The note is for when the photo is not shown; here it is.
+        assert!(text(&message).expect("text").ends_with("[Photo]"));
+        assert!(!caption(&message).expect("caption").contains("[Photo]"));
+    }
+
+    #[test]
+    fn a_header_photo_brings_its_preview_before_it_downloads() {
+        let mut card = interactive_card(None, "Hi", None, Vec::new());
+        with_photo_header(&mut card);
+        assert_eq!(
+            super::super::thumbnail_of(&holding(card)),
+            Some(vec![0xFF, 0xD8, 0x01])
+        );
+    }
+
+    #[test]
+    fn templates_and_buttons_carry_their_header_photos_too() {
+        use wa::message::template_message::HydratedFourRowTemplate;
+        let template = proto(|message: &mut wa::Message| {
+            message.template_message =
+                MessageField::some(proto(|template: &mut wa::message::TemplateMessage| {
+                    template.hydrated_template =
+                        MessageField::some(proto(|hydrated: &mut HydratedFourRowTemplate| {
+                            hydrated.title = Some(Title::ImageMessage(Box::new(photo())));
+                            hydrated.hydrated_content_text = Some("Ticket".to_owned());
+                        }));
+                }));
+        });
+        assert!(media_carrier(&template).is_some());
+
+        let buttons = proto(|message: &mut wa::Message| {
+            message.buttons_message =
+                MessageField::some(proto(|buttons: &mut wa::message::ButtonsMessage| {
+                    buttons.header = Some(ButtonsHeader::ImageMessage(Box::new(photo())));
+                    buttons.content_text = Some("Pick one".to_owned());
+                }));
+        });
+        assert!(media_carrier(&buttons).is_some());
+    }
+
+    /// Each card in a carousel has its own picture; none of them is the
+    /// message.
+    #[test]
+    fn a_carousel_is_not_turned_into_one_of_its_pictures() {
+        let mut first = interactive_card(Some("A"), "a", None, Vec::new());
+        with_photo_header(&mut first);
+        let carousel = proto(|carousel: &mut im::CarouselMessage| carousel.cards = vec![first]);
+        let mut outer = interactive_card(None, "Pick", None, Vec::new());
+        outer.interactive_message = Some(Kind::CarouselMessage(Box::new(carousel)));
+        assert!(media_carrier(&holding(outer)).is_none());
+    }
+
+    /// A bare preview in the header has no download keys, so there is nothing
+    /// to show beyond the note.
+    #[test]
+    fn a_header_with_only_a_preview_stays_text_with_a_note() {
+        let mut card = interactive_card(None, "Hi", None, Vec::new());
+        card.header.get_or_insert_default().media = Some(Media::JpegThumbnail(vec![0xFF]));
+        let message = holding(card);
+        assert!(media_carrier(&message).is_none());
+        assert!(text(&message).expect("text").ends_with("[Photo]"));
+    }
+
+    #[test]
+    fn a_forwarded_business_photo_goes_out_as_the_photo_with_its_caption() {
+        use crate::model::Content;
+        let mut card = interactive_card(Some("Sale"), "Half price", None, Vec::new());
+        with_photo_header(&mut card);
+        let shown = Content::Image {
+            caption: Some("*Sale*\n\nHalf price".to_owned()),
+            media: crate::model::Media {
+                mime: "image/jpeg".to_owned(),
+                size: 48_000,
+                width: Some(800),
+                height: Some(600),
+                path: None,
+                state: Default::default(),
+            },
+        };
+        let out = super::super::forwardable(holding(card), &shown);
+        assert!(!out.interactive_message.is_set());
+        let image = out.image_message.as_option().expect("the photo");
+        assert_eq!(image.caption.as_deref(), Some("*Sale*\n\nHalf price"));
+        assert_eq!(image.media_key, photo().media_key);
     }
 
     #[test]

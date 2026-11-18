@@ -817,6 +817,7 @@ pub fn populate(app: &mut App) {
 /// protobufs WhatsApp sends and filed through the worker's own `classify`.
 fn business(app: &mut App) {
     use wa::__buffa::oneof::message::interactive_message::InteractiveMessage as Kind;
+    use wa::__buffa::oneof::message::interactive_message::header::Media as HeaderMedia;
     use wa::message::interactive_message as im;
     use whatsapp_rust::prelude::{MessageField, wa};
 
@@ -832,6 +833,14 @@ fn business(app: &mut App) {
             MessageField::some(proto(|card: &mut wa::message::InteractiveMessage| {
                 card.header = MessageField::some(proto(|header: &mut im::Header| {
                     header.title = Some("Your parcel is out for delivery".to_owned());
+                    header.media = Some(HeaderMedia::ImageMessage(Box::new(proto(
+                        |image: &mut wa::message::ImageMessage| {
+                            image.mimetype = Some("image/jpeg".to_owned());
+                            image.file_length = Some(402_113);
+                            image.width = Some(900);
+                            image.height = Some(1200);
+                        },
+                    ))));
                 }));
                 card.body = MessageField::some(proto(|body: &mut im::Body| {
                     body.text = Some(
@@ -877,12 +886,25 @@ fn business(app: &mut App) {
     };
     let id = SAMPLES[0].id;
     let now = crate::util::now();
+    // Demo mode has no network, so the header photo borrows a sample file.
+    let picture = app
+        .conversations
+        .get(id)
+        .and_then(|conversation| {
+            conversation
+                .messages
+                .iter()
+                .find(|row| row.id == "ada-tall")
+        })
+        .and_then(|row| row.content.media())
+        .and_then(|media| media.path.clone());
+    let mut notice = message(id, "business-notice", false, now - 300, filed(&notice));
+    if let Some(media) = notice.content.media_mut() {
+        media.path = picture;
+    }
     let reply = message(id, "business-reply", true, now - 60, filed(&tapped));
     let summary = reply.content.summary();
-    let messages = vec![
-        message(id, "business-notice", false, now - 300, filed(&notice)),
-        reply,
-    ];
+    let messages = vec![notice, reply];
     if let Some(chat) = app.chats.iter_mut().find(|chat| chat.id == id) {
         chat.name = "Acme Couriers".into();
         if let Some(last) = &mut chat.last {

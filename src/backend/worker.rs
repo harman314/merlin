@@ -619,7 +619,9 @@ impl Worker {
 
     fn backfill(&mut self) {
         // 3: business messages carry readable text instead of "unsupported".
-        const VERSION: &str = "3";
+        // 4: a business message with a photo, video or document in its header
+        //    is filed as that attachment, captioned with its text.
+        const VERSION: &str = "4";
         if self.archive.meta("derived").ok().flatten().as_deref() == Some(VERSION) {
             return;
         }
@@ -3492,7 +3494,10 @@ impl Worker {
             );
             return;
         };
-        let base = message.get_base_message().clone();
+        // A business message keeps its photo in the header; the carrier puts
+        // it where the rest of this function looks.
+        let base = interactive::media_carrier(message.get_base_message())
+            .unwrap_or_else(|| message.get_base_message().clone());
         let (downloadable, mime, file_name): (Box<dyn Downloadable>, String, Option<String>) =
             if let Some(image) = base.image_message.as_option() {
                 (
@@ -4666,12 +4671,32 @@ pub(crate) fn classify_for_demo(message: &wa::Message) -> Option<Content> {
 /// cannot be re-sent from a personal account, so it travels as the text the
 /// window shows for it, which recipients see with the same markup.
 fn forwardable(original: wa::Message, shown: &Content) -> wa::Message {
-    match shown {
-        Content::Text { text, .. } if interactive::is_business(original.get_base_message()) => {
-            outgoing_text(text.clone(), None, &[])
-        }
-        _ => original,
+    let base = original.get_base_message();
+    if !interactive::is_business(base) {
+        return original;
     }
+    if let Content::Text { text, .. } = shown {
+        return outgoing_text(text.clone(), None, &[]);
+    }
+    // A header attachment goes out as itself, relayed from the same upload,
+    // with the caption the window shows.
+    let caption = match shown {
+        Content::Image { caption, .. }
+        | Content::Video { caption, .. }
+        | Content::Document { caption, .. } => caption.clone(),
+        _ => None,
+    };
+    let Some(mut carrier) = interactive::media_carrier(base) else {
+        return original;
+    };
+    if let Some(image) = carrier.image_message.as_option_mut() {
+        image.caption = caption;
+    } else if let Some(video) = carrier.video_message.as_option_mut() {
+        video.caption = caption;
+    } else if let Some(document) = carrier.document_message.as_option_mut() {
+        document.caption = caption;
+    }
+    carrier
 }
 
 fn outgoing_text(
@@ -4769,6 +4794,8 @@ fn thumbnail_of(base: &wa::Message) -> Option<Vec<u8>> {
         document.jpeg_thumbnail.clone()
     } else if let Some(text) = base.extended_text_message.as_option() {
         text.jpeg_thumbnail.clone()
+    } else if let Some(carrier) = interactive::media_carrier(base) {
+        return thumbnail_of(&carrier);
     } else {
         None
     };
@@ -4935,6 +4962,19 @@ fn classify(base: &wa::Message) -> Option<Content> {
         return unsupported("sticker pack");
     }
     if interactive::is_business(base) {
+        // A photo, video or document in the header becomes the message, with
+        // the business's words as its caption.
+        if let Some(carrier) = interactive::media_carrier(base)
+            && let Some(mut content) = classify(&carrier)
+        {
+            if let Content::Image { caption, .. }
+            | Content::Video { caption, .. }
+            | Content::Document { caption, .. } = &mut content
+            {
+                *caption = interactive::caption(base);
+            }
+            return Some(content);
+        }
         return match interactive::text(base) {
             Some(text) => Some(Content::text(text)),
             None => unsupported("interactive message"),

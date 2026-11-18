@@ -160,9 +160,11 @@ See **[github.com/harman314/merlin](https://github.com/harman314/merlin)** for d
 
 - **Business messages.** Order updates, bookings and one-time codes from
   WhatsApp Business show their title, text, footer and buttons, with links and
-  codes written out. The buttons are listed rather than tappable. Messages
-  that arrived before this showed as unsupported are re-read from the archive
-  on the next start.
+  codes written out. A photo, video or document in the message's header is
+  shown and downloaded like any other, with the business's text as its
+  caption. The buttons are listed rather than tappable. Messages that arrived
+  before this showed as unsupported are re-read from the archive on the next
+  start.
 
 ## What it does not do yet
 
