@@ -813,6 +813,89 @@ pub fn populate(app: &mut App) {
     app.focus_composer = false;
 }
 
+/// A courier's delivery notice and the reply tapped out of it, built as the
+/// protobufs WhatsApp sends and filed through the worker's own `classify`.
+fn business(app: &mut App) {
+    use wa::__buffa::oneof::message::interactive_message::InteractiveMessage as Kind;
+    use wa::message::interactive_message as im;
+    use whatsapp_rust::prelude::{MessageField, wa};
+
+    use crate::util::proto;
+    let button = |name: &str, params: serde_json::Value| {
+        proto(|button: &mut im::native_flow_message::NativeFlowButton| {
+            button.name = Some(name.to_owned());
+            button.button_params_json = Some(params.to_string());
+        })
+    };
+    let notice = proto(|message: &mut wa::Message| {
+        message.interactive_message =
+            MessageField::some(proto(|card: &mut wa::message::InteractiveMessage| {
+                card.header = MessageField::some(proto(|header: &mut im::Header| {
+                    header.title = Some("Your parcel is out for delivery".to_owned());
+                }));
+                card.body = MessageField::some(proto(|body: &mut im::Body| {
+                    body.text = Some(
+                        "Order 4821 arrives today between 2 and 4 pm. Give the courier \
+                         your code at the door."
+                            .to_owned(),
+                    );
+                }));
+                card.footer = MessageField::some(proto(|footer: &mut im::Footer| {
+                    footer.text = Some("Acme Couriers. Reply STOP to opt out.".to_owned());
+                }));
+                let flow = proto(|flow: &mut im::NativeFlowMessage| {
+                    flow.buttons = vec![
+                        button(
+                            "cta_copy",
+                            serde_json::json!({ "display_text": "Copy code", "copy_code": "7314" }),
+                        ),
+                        button(
+                            "cta_url",
+                            serde_json::json!({
+                                "display_text": "Track parcel",
+                                "url": "https://example.com/track/4821",
+                            }),
+                        ),
+                        button(
+                            "quick_reply",
+                            serde_json::json!({ "display_text": "Reschedule" }),
+                        ),
+                    ];
+                });
+                card.interactive_message = Some(Kind::NativeFlowMessage(Box::new(flow)));
+            }));
+    });
+    let tapped = proto(|message: &mut wa::Message| {
+        message.template_button_reply_message = MessageField::some(proto(
+            |reply: &mut wa::message::TemplateButtonReplyMessage| {
+                reply.selected_display_text = Some("Reschedule".to_owned());
+            },
+        ));
+    });
+    let filed = |message: &wa::Message| {
+        crate::backend::classify_for_demo(message).expect("a readable business message")
+    };
+    let id = SAMPLES[0].id;
+    let now = crate::util::now();
+    let reply = message(id, "business-reply", true, now - 60, filed(&tapped));
+    let summary = reply.content.summary();
+    let messages = vec![
+        message(id, "business-notice", false, now - 300, filed(&notice)),
+        reply,
+    ];
+    if let Some(chat) = app.chats.iter_mut().find(|chat| chat.id == id) {
+        chat.name = "Acme Couriers".into();
+        if let Some(last) = &mut chat.last {
+            last.from_me = true;
+            last.summary = summary;
+        }
+    }
+    app.conversations.get_mut(id).expect("demo chat").messages = messages;
+    app.open_chat = Some(id.into());
+    app.typing.clear();
+    app.scroll_to_bottom = true;
+}
+
 /// Applies the UI state selected by `--demo-page`.
 pub fn apply_flags(app: &mut App, page: Option<&str>) {
     let Some(page) = page else {
@@ -875,6 +958,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                 app.typing.clear();
                 app.scroll_to_bottom = true;
             }
+            "business" => business(app),
             "settings" => app.page = Page::Settings,
             "omarchy" | "omarchy-light" => {
                 let mut themes: Vec<_> = crate::theme::presets::themes().collect();
@@ -1221,6 +1305,24 @@ pub fn apply_flags(app: &mut App, page: Option<&str>) {
                     row.read_at = Some(row.timestamp + 60 * 60 * 7);
                 }
             }
+            // The menu on a downloaded photo, with Copy file and Save file.
+            "file-menu" => {
+                // Moved to the bottom, where the view starts, so the menu shows.
+                if let Some(conversation) = app.conversations.get_mut(SAMPLES[0].id)
+                    && let Some(at) = conversation
+                        .messages
+                        .iter()
+                        .position(|message| message.id == "ada-tall")
+                {
+                    let mut photo = conversation.messages.remove(at);
+                    photo.timestamp = crate::util::now();
+                    conversation.messages.push(photo);
+                }
+                app.open_chat = Some(SAMPLES[0].id.into());
+                app.open_message_menu = Some("ada-tall".into());
+                app.typing.clear();
+                app.scroll_to_bottom = true;
+            }
             "react-picker" => {
                 let chat = SAMPLES[0].id.to_owned();
                 app.reaction_target = Some((chat, "ada-link".into()));
@@ -1469,6 +1571,7 @@ mod tests {
         for page in [
             "empty",
             "rtl",
+            "business",
             "disappearing",
             "settings",
             "update",
@@ -1519,6 +1622,7 @@ mod tests {
             "gifs",
             "gifs-badkey",
             "react-menu",
+            "file-menu",
             "react-picker",
             "react-picker-empty",
             "react-custom",

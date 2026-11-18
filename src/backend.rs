@@ -17,6 +17,9 @@ mod read_sync;
 pub(crate) mod sticker_import;
 mod worker;
 
+#[cfg(any(test, feature = "demo"))]
+pub(crate) use worker::classify_for_demo;
+
 /// Phone-link state.
 #[derive(Clone, Debug, PartialEq)]
 pub enum LinkStatus {

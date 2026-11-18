@@ -4655,6 +4655,13 @@ fn non_empty(text: &Option<String>) -> Option<String> {
 }
 
 /// Builds a text body with optional quote and mention context.
+/// What the archive files for `message`. The demo builds its business sample
+/// through this, so a screenshot shows the window's real rendering of one.
+#[cfg(any(test, feature = "demo"))]
+pub(crate) fn classify_for_demo(message: &wa::Message) -> Option<Content> {
+    classify(message.get_base_message())
+}
+
 /// What goes out when a message is forwarded. A business message's buttons
 /// cannot be re-sent from a personal account, so it travels as the text the
 /// window shows for it, which recipients see with the same markup.
